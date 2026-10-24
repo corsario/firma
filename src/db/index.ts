@@ -9,7 +9,7 @@ export class CellDatabase extends Dexie {
   constructor() {
     super('LaVerdadDeCristoDB');
     this.version(1).stores({
-      members: 'id, fullName, canLead, canPreach, isActive, createdAt',
+      members: 'id, fullName, canLeadCell, canPreachCell, canLeadChurch, canPreachChurch, isActive, createdAt',
       events: 'id, date, type, status, origin, leaderId, preacherId, generationKey',
       settings: 'id'
     });
@@ -22,7 +22,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   id: 'cell_settings',
   cellName: 'La verdad de Cristo',
   territory: 'Territorio #9',
-  defaultLocation: 'Casa de paz habitual',
-  defaultTime: '18:00',
+  cellLocation: 'Casa de paz habitual',
+  cellTime: '18:00',
+  churchName: 'Iglesia La verdad de Cristo',
+  churchLocation: 'Templo Central, Calle Principal',
   updatedAt: new Date().toISOString()
 };

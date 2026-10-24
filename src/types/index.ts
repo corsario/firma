@@ -15,8 +15,12 @@ export interface Member {
   fullName: string;
   phone?: string;
   address?: string;
-  canLead: boolean;
-  canPreach: boolean;
+  // Capacidades en Célula
+  canLeadCell: boolean;
+  canPreachCell: boolean;
+  // Capacidades en Iglesia
+  canLeadChurch: boolean;
+  canPreachChurch: boolean;
   isActive: boolean;
   notes?: string;
   createdAt: string;
@@ -49,9 +53,13 @@ export interface CellEvent {
 
 export interface AppSettings {
   id: string;
+  // Datos Célula
   cellName: string;
   territory: string;
-  defaultLocation: string;
-  defaultTime: string;
+  cellLocation: string;
+  cellTime: string;
+  // Datos Iglesia
+  churchName: string;
+  churchLocation: string;
   updatedAt: string;
 }
