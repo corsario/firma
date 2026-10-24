@@ -1,0 +1,46 @@
+﻿name: Compilar APK La verdad de Cristo
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Configurar Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: 17
+
+      - name: Instalar dependencias web
+        run: npm ci || npm install
+
+      - name: Compilar aplicación web
+        run: npm run build
+
+      - name: Inicializar Capacitor Android
+        run: |
+          npx cap add android || true
+          npx cap sync android
+
+      - name: Compilar APK con Gradle
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Subir APK generado como descarga
+        uses: actions/upload-artifact@v4
+        with:
+          name: LaVerdadDeCristo-Territorio9-Debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
