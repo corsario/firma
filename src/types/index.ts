@@ -1,4 +1,12 @@
-export type EventType = 'Servicio de célula' | 'Reunión de oración' | 'Visita' | 'Actividad especial' | 'Otro';
+export type EventType =
+  | 'Servicio de célula'
+  | 'Ayuno'
+  | 'Curso de bautismo'
+  | 'Escuela Dominical'
+  | 'Cena del Señor'
+  | 'Reunión de oración'
+  | 'Otro';
+
 export type EventStatus = 'Programado' | 'Realizado' | 'Cancelado';
 export type EventOrigin = 'Manual' | 'Generado';
 
@@ -24,6 +32,11 @@ export interface CellEvent {
   location?: string;
   leaderId: string | null;
   preacherId: string | null;
+  breadPrayerMemberId?: string | null;
+  winePrayerMemberId?: string | null;
+  helper1Id?: string | null;
+  helper2Id?: string | null;
+  helper3Id?: string | null;
   topic?: string;
   notes?: string;
   status: EventStatus;
