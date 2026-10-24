@@ -189,7 +189,7 @@ export default function App() {
     showMsg(`Se generaron ${count} cultos para ${MONTH_NAMES[currentMonth]} ${currentYear}.`);
   };
 
-  // 3. Asignación automática equitativa
+  // 3. ASIGNACIÓN ALEATORIA INTELIGENTE Y EQUITATIVA
   const handleAutoAssign = async () => {
     const ym = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
     const monthEvents = events.filter(e => e.date.startsWith(ym) && e.status === 'Programado');
@@ -201,43 +201,77 @@ export default function App() {
       return;
     }
 
+    if (activeLeaders.length === 1 && activePreachers.length === 1 && activeLeaders[0].id === activePreachers[0].id) {
+      showMsg('Se necesita al menos dos personas para alternar dirigir y predicar.');
+      return;
+    }
+
+    // Contadores para garantizar equidad
     const leadCount: Record<string, number> = {};
     const preachCount: Record<string, number> = {};
     activeLeaders.forEach(m => { leadCount[m.id] = 0; });
     activePreachers.forEach(m => { preachCount[m.id] = 0; });
 
+    let lastLeaderId: string | null = null;
+    let lastPreacherId: string | null = null;
+
+    // Selector 100% aleatorio entre quienes tienen el mínimo de participaciones
+    const pickRandomMin = (
+      candidates: Member[],
+      counts: Record<string, number>,
+      excludeId?: string | null,
+      avoidConsecutiveId?: string | null
+    ) => {
+      let pool = candidates.filter(c => c.id !== excludeId);
+      if (pool.length === 0) pool = candidates;
+
+      // Intentar evitar repetir la misma persona consecutiva si hay alternativas
+      if (pool.length > 1 && avoidConsecutiveId) {
+        const withoutConsecutive = pool.filter(c => c.id !== avoidConsecutiveId);
+        if (withoutConsecutive.length > 0) {
+          pool = withoutConsecutive;
+        }
+      }
+
+      // Encontrar el mínimo de participaciones
+      const minCount = Math.min(...pool.map(c => counts[c.id] || 0));
+      // Filtrar a todos los que empatan con ese mínimo
+      const minCandidates = pool.filter(c => (counts[c.id] || 0) === minCount);
+
+      // Selección aleatoria
+      const randomIndex = Math.floor(Math.random() * minCandidates.length);
+      return minCandidates[randomIndex];
+    };
+
     let assignedCount = 0;
 
     for (const ev of monthEvents) {
-      let lId = ev.leaderId;
-      let pId = ev.preacherId;
-
-      if (!lId && activeLeaders.length > 0) {
-        const sorted = [...activeLeaders].sort((a, b) => (leadCount[a.id] || 0) - (leadCount[b.id] || 0));
-        lId = sorted[0].id;
+      // 1. Dirigente aleatorio
+      const chosenLeader = pickRandomMin(activeLeaders, leadCount, null, lastLeaderId);
+      const lId = chosenLeader ? chosenLeader.id : null;
+      if (lId) {
         leadCount[lId] = (leadCount[lId] || 0) + 1;
+        lastLeaderId = lId;
       }
 
-      if (!pId && activePreachers.length > 0) {
-        const eligible = activePreachers.filter(m => m.id !== lId);
-        const candidates = eligible.length > 0 ? eligible : activePreachers;
-        const sorted = [...candidates].sort((a, b) => (preachCount[a.id] || 0) - (preachCount[b.id] || 0));
-        pId = sorted[0].id;
+      // 2. Predicador aleatorio (nunca el mismo que dirige)
+      const chosenPreacher = pickRandomMin(activePreachers, preachCount, lId, lastPreacherId);
+      const pId = chosenPreacher ? chosenPreacher.id : null;
+      if (pId) {
         preachCount[pId] = (preachCount[pId] || 0) + 1;
+        lastPreacherId = pId;
       }
 
-      if (lId !== ev.leaderId || pId !== ev.preacherId) {
-        await db.events.update(ev.id, {
-          leaderId: lId,
-          preacherId: pId,
-          updatedAt: new Date().toISOString()
-        });
-        assignedCount++;
-      }
+      await db.events.update(ev.id, {
+        leaderId: lId,
+        preacherId: pId,
+        updatedAt: new Date().toISOString()
+      });
+      assignedCount++;
     }
 
     await loadAll();
-    showMsg(`Se asignaron responsables en ${assignedCount} cultos.`);
+    showMsg(`🎲 ¡Asignación aleatoria y equitativa aplicada a ${assignedCount} cultos!`);
   };
 
   // 4. Modal de edición manual de culto
@@ -283,7 +317,7 @@ export default function App() {
     }
   };
 
-  // 5. EXCLUSIVO: Compartir la programación completa del mes por WhatsApp
+  // 5. Compartir la programación completa del mes por WhatsApp
   const handleShareMonth = () => {
     const ym = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
     const monthEvents = events
@@ -389,7 +423,7 @@ export default function App() {
                 ⚡ Generar Miércoles
               </button>
               <button onClick={handleAutoAssign} style={{ background: '#b45309', color: '#fff', border: 'none', padding: '10px', borderRadius: '10px', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer' }}>
-                🎯 Asignar Hermanos
+                🎲 Asignar al Azar
               </button>
             </div>
 
@@ -418,7 +452,7 @@ export default function App() {
               <span>Compartir Programación del Mes por WhatsApp</span>
             </button>
 
-            {/* Lista de cultos con Dirige y Predica explícitos */}
+            {/* Lista de cultos */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {currentMonthEvents.length === 0 ? (
                 <div style={{ background: '#fff', padding: '24px', borderRadius: '12px', textAlign: 'center', color: '#64748b', fontSize: '0.85rem' }}>
