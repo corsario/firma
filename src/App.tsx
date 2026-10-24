@@ -14,7 +14,7 @@ export default function App() {
   const [currentYear, setCurrentYear] = useState(today.getFullYear());
   const [currentMonth, setCurrentMonth] = useState(today.getMonth());
 
-  // Formulario de Ajustes (editables)
+  // Formulario de Ajustes
   const [formCellName, setFormCellName] = useState('');
   const [formTerritory, setFormTerritory] = useState('');
   const [formLocation, setFormLocation] = useState('');
@@ -68,6 +68,24 @@ export default function App() {
     if (!id) return null;
     const m = members.find(x => x.id === id);
     return m ? m.fullName : null;
+  };
+
+  const formatFriendlyTime = (timeStr: string) => {
+    if (!timeStr) return '';
+    const [hStr, mStr] = timeStr.split(':');
+    let h = parseInt(hStr, 10);
+    const m = mStr || '00';
+    const ampm = h >= 12 ? 'p. m.' : 'a. m.';
+    h = h % 12;
+    if (h === 0) h = 12;
+    return `${h}:${m} ${ampm}`;
+  };
+
+  const formatFriendlyDate = (dateStr: string) => {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const dt = new Date(y, m - 1, d, 12, 0, 0);
+    const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+    return `${dayNames[dt.getDay()]} ${d} de ${MONTH_NAMES[m - 1]}`;
   };
 
   // 1. Guardar Ajustes
@@ -168,7 +186,7 @@ export default function App() {
       }
     }
     await loadAll();
-    showMsg(`Se generaron ${count} servicios para ${MONTH_NAMES[currentMonth]} ${currentYear}.`);
+    showMsg(`Se generaron ${count} cultos para ${MONTH_NAMES[currentMonth]} ${currentYear}.`);
   };
 
   // 3. Asignación automática equitativa
@@ -265,24 +283,7 @@ export default function App() {
     }
   };
 
-  // 5. WhatsApp: individual
-  const handleShareSingle = (ev: CellEvent) => {
-    const lName = getMemberName(ev.leaderId) || 'Pendiente';
-    const pName = getMemberName(ev.preacherId) || 'Pendiente';
-
-    let text = `*${settings.cellName.toUpperCase()}*\n`;
-    text += `${settings.territory}\n\n`;
-    text += `*${ev.title.toUpperCase()}*\n`;
-    text += `📅 Fecha: ${ev.date}\n`;
-    text += `🕕 Hora: ${ev.startTime}\n`;
-    text += `📍 Lugar: ${ev.location || settings.defaultLocation}\n`;
-    text += `👤 Dirige: ${lName}\n`;
-    text += `📖 Predica: ${pName}\n`;
-
-    window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
-  };
-
-  // 6. WhatsApp: mes completo con dirigentes y predicadores explícitos
+  // 5. EXCLUSIVO: Compartir la programación completa del mes por WhatsApp
   const handleShareMonth = () => {
     const ym = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
     const monthEvents = events
@@ -290,20 +291,22 @@ export default function App() {
       .sort((a, b) => a.date.localeCompare(b.date));
 
     if (monthEvents.length === 0) {
-      showMsg('No hay cultos programados en este mes para compartir.');
+      showMsg('No hay cultos programados en este mes. Pulsa "Generar Miércoles".');
       return;
     }
 
     let text = `*${settings.cellName.toUpperCase()}*\n`;
     text += `${settings.territory}\n`;
-    text += `*PROGRAMACIÓN — ${MONTH_NAMES[currentMonth].toUpperCase()} ${currentYear}*\n\n`;
+    text += `*CALENDARIO — ${MONTH_NAMES[currentMonth].toUpperCase()} ${currentYear}*\n\n`;
 
     const blocks = monthEvents.map(ev => {
       const lName = getMemberName(ev.leaderId) || 'Pendiente';
       const pName = getMemberName(ev.preacherId) || 'Pendiente';
-      let b = `📅 *${ev.date}* — ${ev.title}\n`;
-      b += `🕕 Hora: ${ev.startTime}\n`;
-      b += `📍 Lugar: ${ev.location || settings.defaultLocation}\n`;
+
+      let b = `📅 *${formatFriendlyDate(ev.date)}*\n`;
+      b += `*${ev.title}*\n`;
+      b += `🕕 Hora: ${formatFriendlyTime(ev.startTime)}\n`;
+      b += `📍 Lugar: ${ev.location || settings.defaultLocation || 'Casa habitual'}\n`;
       b += `👤 Dirige: ${lName}\n`;
       b += `📖 Predica: ${pName}`;
       return b;
@@ -313,7 +316,7 @@ export default function App() {
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
   };
 
-  // 7. Miembros
+  // 6. Miembros
   const handleAddMember = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMemberName.trim()) return;
@@ -380,7 +383,7 @@ export default function App() {
               <button onClick={() => { if (currentMonth === 11) { setCurrentMonth(0); setCurrentYear(y => y + 1); } else { setCurrentMonth(m => m + 1); } }} style={{ background: '#f1f5f9', border: '1px solid #cbd5e1', padding: '6px 12px', borderRadius: '8px', cursor: 'pointer', fontWeight: 700 }}>▶</button>
             </div>
 
-            {/* Acciones principales */}
+            {/* Acciones principales del mes */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '10px' }}>
               <button onClick={handleGenerateMonth} style={{ background: '#0f172a', color: '#fff', border: 'none', padding: '10px', borderRadius: '10px', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer' }}>
                 ⚡ Generar Miércoles
@@ -390,11 +393,32 @@ export default function App() {
               </button>
             </div>
 
-            <button onClick={handleShareMonth} style={{ width: '100%', background: '#059669', color: '#fff', border: 'none', padding: '12px', borderRadius: '10px', fontSize: '0.82rem', fontWeight: 800, cursor: 'pointer', marginBottom: '14px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px' }}>
-              <span>💬 Compartir Todo el Mes por WhatsApp</span>
+            {/* Botón Principal para Compartir Todo el Mes */}
+            <button
+              onClick={handleShareMonth}
+              style={{
+                width: '100%',
+                background: '#059669',
+                color: '#fff',
+                border: 'none',
+                padding: '13px',
+                borderRadius: '12px',
+                fontSize: '0.85rem',
+                fontWeight: 800,
+                cursor: 'pointer',
+                marginBottom: '14px',
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                gap: '8px',
+                boxShadow: '0 3px 6px rgba(5, 150, 105, 0.25)'
+              }}
+            >
+              <span style={{ fontSize: '1.1rem' }}>📲</span>
+              <span>Compartir Programación del Mes por WhatsApp</span>
             </button>
 
-            {/* Lista de cultos */}
+            {/* Lista de cultos con Dirige y Predica explícitos */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {currentMonthEvents.length === 0 ? (
                 <div style={{ background: '#fff', padding: '24px', borderRadius: '12px', textAlign: 'center', color: '#64748b', fontSize: '0.85rem' }}>
@@ -408,37 +432,33 @@ export default function App() {
                   return (
                     <div key={ev.id} style={{ background: '#ffffff', borderRadius: '12px', border: '1px solid #cbd5e1', padding: '14px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                        <span style={{ fontWeight: 800, fontSize: '0.9rem', color: '#0f172a' }}>📅 {ev.date}</span>
-                        <span style={{ fontSize: '0.7rem', color: '#64748b' }}>🕕 {ev.startTime}</span>
+                        <span style={{ fontWeight: 800, fontSize: '0.9rem', color: '#0f172a' }}>📅 {formatFriendlyDate(ev.date)}</span>
+                        <span style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600 }}>🕕 {formatFriendlyTime(ev.startTime)}</span>
                       </div>
                       <div style={{ fontSize: '0.75rem', color: '#475569', marginBottom: '10px' }}>
                         📍 {ev.location || settings.defaultLocation}
                       </div>
 
-                      {/* Tarjeta de Responsables */}
-                      <div style={{ background: '#f8fafc', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '12px' }}>
+                      {/* Tarjeta de Responsables explícitos */}
+                      <div style={{ background: '#f8fafc', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '10px' }}>
                         <div>
                           <span style={{ display: 'block', fontSize: '0.65rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 700 }}>Dirige:</span>
-                          <span style={{ fontSize: '0.8rem', fontWeight: 700, color: leaderName ? '#1e3a8a' : '#d97706' }}>
+                          <span style={{ fontSize: '0.82rem', fontWeight: 700, color: leaderName ? '#1e3a8a' : '#d97706' }}>
                             {leaderName || '⚠️ Pendiente'}
                           </span>
                         </div>
                         <div>
                           <span style={{ display: 'block', fontSize: '0.65rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 700 }}>Predica:</span>
-                          <span style={{ fontSize: '0.8rem', fontWeight: 700, color: preacherName ? '#1e3a8a' : '#d97706' }}>
+                          <span style={{ fontSize: '0.82rem', fontWeight: 700, color: preacherName ? '#1e3a8a' : '#d97706' }}>
                             {preacherName || '⚠️ Pendiente'}
                           </span>
                         </div>
                       </div>
 
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        <button onClick={() => openEditEvent(ev)} style={{ flex: 1, background: '#1e293b', color: '#fff', border: 'none', padding: '8px', borderRadius: '8px', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer' }}>
-                          ✏️ Asignar / Editar
-                        </button>
-                        <button onClick={() => handleShareSingle(ev)} style={{ background: '#059669', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: '8px', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer' }}>
-                          💬 Enviar
-                        </button>
-                      </div>
+                      {/* Botón único para asignar o editar culto */}
+                      <button onClick={() => openEditEvent(ev)} style={{ width: '100%', background: '#1e293b', color: '#fff', border: 'none', padding: '9px', borderRadius: '8px', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer' }}>
+                        ✏️ Asignar Hermanos / Editar
+                      </button>
                     </div>
                   );
                 })
@@ -514,7 +534,6 @@ export default function App() {
         {/* 4. AJUSTES EDITABLES */}
         {tab === 'ajustes' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-            {/* Formulario de configuración editable */}
             <form onSubmit={handleSaveSettings} style={{ background: '#fff', padding: '16px', borderRadius: '12px', border: '1px solid #cbd5e1' }}>
               <h3 style={{ margin: '0 0 12px', fontSize: '1rem', fontWeight: 800, color: '#0f172a' }}>⚙️ Configurar Célula</h3>
 
@@ -543,7 +562,6 @@ export default function App() {
               </button>
             </form>
 
-            {/* Copias de seguridad */}
             <div style={{ background: '#fff', padding: '16px', borderRadius: '12px', border: '1px solid #cbd5e1' }}>
               <h3 style={{ margin: '0 0 8px', fontSize: '0.9rem', fontWeight: 800 }}>📦 Copias de Seguridad</h3>
               <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0 0 12px' }}>Exporta tus datos periódicamente para no perderlos si cambias de teléfono.</p>
@@ -572,7 +590,7 @@ export default function App() {
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 100 }}>
           <div style={{ background: '#fff', width: '100%', maxWidth: '380px', borderRadius: '16px', padding: '18px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
             <h3 style={{ margin: '0 0 4px', fontSize: '1rem', fontWeight: 800 }}>Asignar Responsables</h3>
-            <p style={{ margin: '0 0 14px', fontSize: '0.75rem', color: '#64748b' }}>📅 {selectedEvent.date}</p>
+            <p style={{ margin: '0 0 14px', fontSize: '0.75rem', color: '#64748b' }}>📅 {formatFriendlyDate(selectedEvent.date)}</p>
 
             <form onSubmit={handleSaveEvent} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               <div>
