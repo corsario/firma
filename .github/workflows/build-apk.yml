@@ -10,6 +10,10 @@ jobs:
       - name: Descargar codigo
         uses: actions/checkout@v4
 
+      - name: Limpiar BOM de archivos JSON
+        run: |
+          find . -name "*.json" -exec sed -i '1s/^\xEF\xBB\xBF//' {} +
+
       - name: Configurar Node.js
         uses: actions/setup-node@v4
         with:
@@ -21,7 +25,7 @@ jobs:
           distribution: 'temurin'
           java-version: 17
 
-      - name: Aceptar licencias del SDK de Android
+      - name: Aceptar licencias Android
         run: |
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
@@ -42,7 +46,7 @@ jobs:
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace
+          ./gradlew assembleDebug --no-daemon
 
       - name: Subir APK generado
         uses: actions/upload-artifact@v4

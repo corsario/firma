@@ -1,4 +1,4 @@
-﻿export type EventType = 'Servicio de célula' | 'Reunión de oración' | 'Visita' | 'Actividad especial' | 'Otro';
+export type EventType = 'Servicio de célula' | 'Reunión de oración' | 'Visita' | 'Actividad especial' | 'Otro';
 export type EventStatus = 'Programado' | 'Realizado' | 'Cancelado';
 export type EventOrigin = 'Manual' | 'Generado';
 

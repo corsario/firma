@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { db, DEFAULT_SETTINGS } from './db';
 import { Member, CellEvent, AppSettings } from './types';
 import { getWednesdaysOfMonth, MONTH_NAMES } from './services/dateUtils';
