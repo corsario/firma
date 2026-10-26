@@ -4,25 +4,21 @@ export type EventType =
   | 'Curso de bautismo'
   | 'Escuela Dominical'
   | 'Cena del Señor'
-  | 'Reunión de oración'
   | 'Otro';
 
 export type EventStatus = 'Programado' | 'Realizado' | 'Cancelado';
-export type EventOrigin = 'Manual' | 'Generado';
 
 export interface Member {
   id: string;
   fullName: string;
   phone?: string;
-  address?: string;
-  // Capacidades en Célula
-  canLeadCell: boolean;
-  canPreachCell: boolean;
-  // Capacidades en Iglesia
-  canLeadChurch: boolean;
-  canPreachChurch: boolean;
+  canLeadCell?: boolean;
+  canPreachCell?: boolean;
+  canLeadChurch?: boolean;
+  canPreachChurch?: boolean;
+  canLead?: boolean;
+  canPreach?: boolean;
   isActive: boolean;
-  notes?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -41,25 +37,21 @@ export interface CellEvent {
   helper1Id?: string | null;
   helper2Id?: string | null;
   helper3Id?: string | null;
-  topic?: string;
-  notes?: string;
   status: EventStatus;
-  origin: EventOrigin;
   generationKey?: string;
-  originalGeneratedDate?: string;
   createdAt: string;
   updatedAt: string;
 }
 
 export interface AppSettings {
   id: string;
-  // Datos Célula
+  entityType: 'iglesia' | 'celula';
+  churchName: string;
+  churchLocation: string;
   cellName: string;
   territory: string;
   cellLocation: string;
+  cellDay: number;
   cellTime: string;
-  // Datos Iglesia
-  churchName: string;
-  churchLocation: string;
   updatedAt: string;
 }

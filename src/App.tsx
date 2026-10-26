@@ -3,8 +3,9 @@ import { db, DEFAULT_SETTINGS } from './db';
 import { Member, CellEvent, AppSettings } from './types';
 import { MONTH_NAMES } from './services/dateUtils';
 
+const DAY_NAMES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+
 export default function App() {
-  const [activeScope, setActiveScope] = useState<'celula' | 'iglesia'>('celula');
   const [tab, setTab] = useState<'calendario' | 'inicio' | 'miembros' | 'ajustes'>('calendario');
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [members, setMembers] = useState<Member[]>([]);
@@ -14,16 +15,21 @@ export default function App() {
   const [currentYear, setCurrentYear] = useState(today.getFullYear());
   const [currentMonth, setCurrentMonth] = useState(today.getMonth());
 
+  // Formulario en Ajustes
+  const [formEntityType, setFormEntityType] = useState<'iglesia' | 'celula'>('iglesia');
+  const [formChurchName, setFormChurchName] = useState('LEHV-La catedral del Avivamiento');
+  const [formChurchLocation, setFormChurchLocation] = useState('');
   const [formCellName, setFormCellName] = useState('');
   const [formTerritory, setFormTerritory] = useState('');
   const [formCellLocation, setFormCellLocation] = useState('');
+  const [formCellDay, setFormCellDay] = useState(3);
   const [formCellTime, setFormCellTime] = useState('18:00');
-  const [formChurchName, setFormChurchName] = useState('LEHV-La catedral del Avivamiento');
-  const [formChurchLocation, setFormChurchLocation] = useState('');
 
+  // Respaldos
   const [showPasteModal, setShowPasteModal] = useState(false);
   const [pastedJsonText, setPastedJsonText] = useState('');
 
+  // Edición de culto
   const [selectedEvent, setSelectedEvent] = useState<CellEvent | null>(null);
   const [modalLeaderId, setModalLeaderId] = useState<string>('');
   const [modalPreacherId, setModalPreacherId] = useState<string>('');
@@ -36,12 +42,11 @@ export default function App() {
   const [modalTime, setModalTime] = useState<string>('');
   const [modalStatus, setModalStatus] = useState<'Programado' | 'Realizado' | 'Cancelado'>('Programado');
 
+  // Formulario de Miembro (contextual al modo activo)
   const [newMemberName, setNewMemberName] = useState('');
   const [newMemberPhone, setNewMemberPhone] = useState('');
-  const [canLeadCell, setCanLeadCell] = useState(false);
-  const [canPreachCell, setCanPreachCell] = useState(false);
-  const [canLeadChurch, setCanLeadChurch] = useState(false);
-  const [canPreachChurch, setCanPreachChurch] = useState(false);
+  const [canLeadRole, setCanLeadRole] = useState(false);
+  const [canPreachRole, setCanPreachRole] = useState(false);
 
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -50,18 +55,16 @@ export default function App() {
     if (!s) {
       s = DEFAULT_SETTINGS;
       await db.settings.put(DEFAULT_SETTINGS);
-    } else if (!s.churchName || s.churchName === 'Iglesia La verdad de Cristo') {
-      s.churchName = 'LEHV-La catedral del Avivamiento';
-      await db.settings.put(s);
     }
-
     setSettings(s);
+    setFormEntityType(s.entityType || 'iglesia');
+    setFormChurchName(s.churchName || 'LEHV-La catedral del Avivamiento');
+    setFormChurchLocation(s.churchLocation || DEFAULT_SETTINGS.churchLocation);
     setFormCellName(s.cellName || DEFAULT_SETTINGS.cellName);
     setFormTerritory(s.territory || DEFAULT_SETTINGS.territory);
     setFormCellLocation(s.cellLocation || DEFAULT_SETTINGS.cellLocation);
+    setFormCellDay(s.cellDay !== undefined ? s.cellDay : 3);
     setFormCellTime(s.cellTime || DEFAULT_SETTINGS.cellTime);
-    setFormChurchName(s.churchName || 'LEHV-La catedral del Avivamiento');
-    setFormChurchLocation(s.churchLocation || DEFAULT_SETTINGS.churchLocation);
 
     const m = await db.members.toArray();
     setMembers(m);
@@ -85,6 +88,17 @@ export default function App() {
     return m ? m.fullName : null;
   };
 
+  const isChurch = settings.entityType === 'iglesia';
+
+  // Evaluar capacidades según el modo configurado
+  const memberCanLead = (m: Member) => {
+    return isChurch ? (m.canLeadChurch ?? m.canLead ?? false) : (m.canLeadCell ?? m.canLead ?? false);
+  };
+
+  const memberCanPreach = (m: Member) => {
+    return isChurch ? (m.canPreachChurch ?? m.canPreach ?? false) : (m.canPreachCell ?? m.canPreach ?? false);
+  };
+
   const formatFriendlyTime = (timeStr: string) => {
     if (!timeStr) return '';
     const [hStr, mStr] = timeStr.split(':');
@@ -99,31 +113,34 @@ export default function App() {
   const formatFriendlyDate = (dateStr: string) => {
     const [y, m, d] = dateStr.split('-').map(Number);
     const dt = new Date(y, m - 1, d, 12, 0, 0);
-    const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
-    return `${dayNames[dt.getDay()]} ${d} de ${MONTH_NAMES[m - 1]}`;
+    return `${DAY_NAMES[dt.getDay()]} ${d} de ${MONTH_NAMES[m - 1]}`;
   };
 
+  // Guardar Ajustes
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     const updated: AppSettings = {
       id: 'cell_settings',
+      entityType: formEntityType,
+      churchName: formChurchName.trim() || 'LEHV-La catedral del Avivamiento',
+      churchLocation: formChurchLocation.trim() || 'Templo Central',
       cellName: formCellName.trim() || 'La verdad de Cristo',
       territory: formTerritory.trim() || 'Territorio #9',
       cellLocation: formCellLocation.trim() || 'Casa habitual',
+      cellDay: Number(formCellDay),
       cellTime: formCellTime || '18:00',
-      churchName: formChurchName.trim() || 'LEHV-La catedral del Avivamiento',
-      churchLocation: formChurchLocation.trim() || 'Templo Central',
       updatedAt: new Date().toISOString()
     };
     await db.settings.put(updated);
     setSettings(updated);
-    showMsg('¡Ajustes guardados con éxito!');
+    showMsg(`¡Configuración de ${formEntityType === 'iglesia' ? 'la Iglesia' : 'la Célula'} guardada!`);
   };
 
+  // Respaldos
   const handleExportBackup = async () => {
     try {
       const data = {
-        schemaVersion: 2,
+        schemaVersion: 3,
         exportedAt: new Date().toISOString(),
         settings,
         members,
@@ -134,7 +151,7 @@ export default function App() {
       if (navigator.share) {
         try {
           await navigator.share({
-            title: 'Copia_LEHV_LaCatedralDelAvivamiento.json',
+            title: `Copia_${isChurch ? 'Iglesia' : 'Celula'}.json`,
             text: jsonStr
           });
           showMsg('Copia exportada con éxito.');
@@ -149,24 +166,24 @@ export default function App() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `Copia_LEHV_${new Date().toISOString().substring(0, 10)}.json`;
+        a.download = `Copia_${new Date().toISOString().substring(0, 10)}.json`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-        showMsg('Archivo de respaldo descargado.');
+        showMsg('Archivo descargado.');
       } catch {
         await navigator.clipboard.writeText(jsonStr);
         showMsg('Copia JSON copiada al portapapeles.');
       }
     } catch {
-      showMsg('Error al exportar la copia.');
+      showMsg('Error al exportar.');
     }
   };
 
   const processRestoreObject = async (parsed: any) => {
     if (!parsed.settings || !Array.isArray(parsed.members) || !Array.isArray(parsed.events)) {
-      showMsg('El archivo no contiene un respaldo válido.');
+      showMsg('El archivo no contiene un formato válido.');
       return;
     }
     if (window.confirm('¿Deseas restaurar esta copia? Reemplazará los datos actuales.')) {
@@ -179,7 +196,7 @@ export default function App() {
         if (parsed.events.length > 0) await db.events.bulkAdd(parsed.events);
       });
       await loadAll();
-      showMsg('¡Copia de seguridad restaurada con éxito!');
+      showMsg('¡Copia restaurada con éxito!');
       setShowPasteModal(false);
       setPastedJsonText('');
     }
@@ -209,17 +226,13 @@ export default function App() {
     }
   };
 
+  // UN SOLO BOTÓN: Generar cultos y sortear
   const handleGenerateAndAssign = async () => {
-    const isCellMode = activeScope === 'celula';
     const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
     const nowIso = new Date().toISOString();
 
-    if (!isCellMode) {
-      const oldBautismos = await db.events.where('type').equals('Curso de bautismo').toArray();
-      for (const b of oldBautismos) {
-        await db.events.delete(b.id);
-      }
-    }
+    const oldBautismos = await db.events.where('type').equals('Curso de bautismo').toArray();
+    for (const b of oldBautismos) await db.events.delete(b.id);
 
     for (let day = 1; day <= daysInMonth; day++) {
       const dt = new Date(currentYear, currentMonth, day, 12, 0, 0);
@@ -228,29 +241,7 @@ export default function App() {
       const monthStr = String(currentMonth + 1).padStart(2, '0');
       const date = `${currentYear}-${monthStr}-${dayStr}`;
 
-      if (isCellMode) {
-        if (dayOfWeek === 3) {
-          const key = `servicio_miercoles_${date}`;
-          const exists = await db.events.where('generationKey').equals(key).first();
-          if (!exists) {
-            await db.events.add({
-              id: 'ev_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
-              title: 'Servicio de célula',
-              type: 'Servicio de célula',
-              date,
-              startTime: settings.cellTime || '18:00',
-              location: settings.cellLocation || 'Casa habitual',
-              leaderId: null,
-              preacherId: null,
-              status: 'Programado',
-              origin: 'Generado',
-              generationKey: key,
-              createdAt: nowIso,
-              updatedAt: nowIso
-            });
-          }
-        }
-      } else {
+      if (isChurch) {
         if (dayOfWeek === 2 || dayOfWeek === 5) {
           const key = `ayuno_${date}`;
           const exists = await db.events.where('generationKey').equals(key).first();
@@ -265,7 +256,6 @@ export default function App() {
               leaderId: null,
               preacherId: null,
               status: 'Programado',
-              origin: 'Generado',
               generationKey: key,
               createdAt: nowIso,
               updatedAt: nowIso
@@ -276,9 +266,8 @@ export default function App() {
         if (dayOfWeek === 0) {
           const isLastSunday = (day + 7) > daysInMonth;
           const keyDominical = isLastSunday ? `cena_senor_${date}` : `escuela_dominical_${date}`;
-          const existsDominical = await db.events.where('generationKey').equals(keyDominical).first();
-
-          if (!existsDominical) {
+          const exists = await db.events.where('generationKey').equals(keyDominical).first();
+          if (!exists) {
             await db.events.add({
               id: 'ev_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
               title: isLastSunday ? 'Cena del Señor' : 'Escuela Dominical',
@@ -294,8 +283,28 @@ export default function App() {
               helper2Id: null,
               helper3Id: null,
               status: 'Programado',
-              origin: 'Generado',
               generationKey: keyDominical,
+              createdAt: nowIso,
+              updatedAt: nowIso
+            });
+          }
+        }
+      } else {
+        if (dayOfWeek === settings.cellDay) {
+          const key = `celula_${date}`;
+          const exists = await db.events.where('generationKey').equals(key).first();
+          if (!exists) {
+            await db.events.add({
+              id: 'ev_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+              title: `Servicio de célula (${settings.cellName})`,
+              type: 'Servicio de célula',
+              date,
+              startTime: settings.cellTime || '18:00',
+              location: settings.cellLocation || 'Casa habitual',
+              leaderId: null,
+              preacherId: null,
+              status: 'Programado',
+              generationKey: key,
               createdAt: nowIso,
               updatedAt: nowIso
             });
@@ -309,7 +318,7 @@ export default function App() {
     const targetEvents = allCurrentEvents.filter(e =>
       e.date.startsWith(ym) &&
       e.status === 'Programado' &&
-      (isCellMode ? e.type === 'Servicio de célula' : e.type !== 'Servicio de célula')
+      (isChurch ? e.type !== 'Servicio de célula' : e.type === 'Servicio de célula')
     );
 
     const activeMembers = members.filter(m => m.isActive);
@@ -351,13 +360,8 @@ export default function App() {
       };
 
       for (const ev of targetEvents) {
-        const isCell = ev.type === 'Servicio de célula';
-        const eligibleLeaders = activeMembers.filter(m =>
-          isCell ? (m.canLeadCell || (m as any).canLead) : (m.canLeadChurch || (m as any).canLead)
-        );
-        const eligiblePreachers = activeMembers.filter(m =>
-          isCell ? (m.canPreachCell || (m as any).canPreach) : (m.canPreachChurch || (m as any).canPreach)
-        );
+        const eligibleLeaders = activeMembers.filter(m => memberCanLead(m));
+        const eligiblePreachers = activeMembers.filter(m => memberCanPreach(m));
 
         const chosenLeader = pickRandomMin(
           eligibleLeaders.length > 0 ? eligibleLeaders : activeMembers,
@@ -387,8 +391,7 @@ export default function App() {
 
         const updates: Partial<CellEvent> = {
           leaderId: lId,
-          preacherId: pId,
-          updatedAt: new Date().toISOString()
+          preacherId: pId
         };
 
         if (ev.type === 'Cena del Señor') {
@@ -421,7 +424,7 @@ export default function App() {
     }
 
     await loadAll();
-    showMsg(`⚡ ¡Mes generado y hermanos asignados para ${isCellMode ? 'la CÉLULA' : 'la IGLESIA'}!`);
+    showMsg(`⚡ ¡Mes generado y hermanos asignados para ${isChurch ? 'la Iglesia' : 'la Célula'}!`);
   };
 
   const openEditEvent = (ev: CellEvent) => {
@@ -433,8 +436,8 @@ export default function App() {
     setModalHelper1Id(ev.helper1Id || '');
     setModalHelper2Id(ev.helper2Id || '');
     setModalHelper3Id(ev.helper3Id || '');
-    setModalLocation(ev.location || (ev.type === 'Servicio de célula' ? settings.cellLocation : settings.churchLocation));
-    setModalTime(ev.startTime || (ev.type === 'Servicio de célula' ? settings.cellTime : '10:00'));
+    setModalLocation(ev.location || (isChurch ? settings.churchLocation : settings.cellLocation));
+    setModalTime(ev.startTime || (isChurch ? '10:00' : settings.cellTime));
     setModalStatus(ev.status || 'Programado');
   };
 
@@ -452,8 +455,7 @@ export default function App() {
       helper3Id: modalHelper3Id || null,
       location: modalLocation,
       startTime: modalTime,
-      status: modalStatus,
-      updatedAt: new Date().toISOString()
+      status: modalStatus
     });
 
     setSelectedEvent(null);
@@ -462,7 +464,7 @@ export default function App() {
   };
 
   const handleDeleteEvent = async (id: string) => {
-    if (window.confirm('¿Deseas eliminar este culto de la lista?')) {
+    if (window.confirm('¿Deseas eliminar este culto?')) {
       await db.events.delete(id);
       setSelectedEvent(null);
       await loadAll();
@@ -470,56 +472,25 @@ export default function App() {
     }
   };
 
-  const handleShareCellOnly = () => {
+  const handleShareWhatsApp = () => {
     const ym = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
-    const cellEvents = events
-      .filter(e => e.date.startsWith(ym) && e.type === 'Servicio de célula' && e.status !== 'Cancelado')
-      .sort((a, b) => a.date.localeCompare(b.date));
-
-    if (cellEvents.length === 0) {
-      showMsg('No hay cultos de célula en este mes.');
-      return;
-    }
-
-    let text = `*CÉLULA — ${settings.cellName.toUpperCase()}*\n`;
-    text += `${settings.territory}\n`;
-    text += `*PROGRAMACIÓN DE MIÉRCOLES — ${MONTH_NAMES[currentMonth].toUpperCase()} ${currentYear}*\n\n`;
-
-    const blocks = cellEvents.map(ev => {
-      const lName = getMemberName(ev.leaderId) || 'Pendiente';
-      const pName = getMemberName(ev.preacherId) || 'Pendiente';
-      let b = `📅 *${formatFriendlyDate(ev.date)}*\n`;
-      b += `*${ev.title}*\n`;
-      b += `🕕 Hora: ${formatFriendlyTime(ev.startTime)}\n`;
-      b += `📍 Lugar: ${ev.location || settings.cellLocation || 'Casa habitual'}\n`;
-      b += `👤 Dirige: ${lName}\n`;
-      b += `📖 Predica: ${pName}`;
-      return b;
-    });
-
-    text += blocks.join('\n\n────────────────\n\n');
-    window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
-  };
-
-  const handleShareChurchOnly = () => {
-    const ym = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
-    const churchEvents = events
-      .filter(e => e.date.startsWith(ym) && e.type !== 'Servicio de célula' && e.status !== 'Cancelado')
+    const targetEvents = events
+      .filter(e => e.date.startsWith(ym) && e.status !== 'Cancelado' && (isChurch ? e.type !== 'Servicio de célula' : e.type === 'Servicio de célula'))
       .sort((a, b) => {
         if (a.date !== b.date) return a.date.localeCompare(b.date);
         return a.startTime.localeCompare(b.startTime);
       });
 
-    if (churchEvents.length === 0) {
-      showMsg('No hay cultos de iglesia en este mes.');
+    if (targetEvents.length === 0) {
+      showMsg('No hay cultos programados en este mes para compartir.');
       return;
     }
 
-    let text = `*${settings.churchName.toUpperCase()}*\n`;
-    text += `📍 Dirección: ${settings.churchLocation}\n`;
-    text += `*PROGRAMACIÓN MENSUAL DE LA IGLESIA — ${MONTH_NAMES[currentMonth].toUpperCase()} ${currentYear}*\n\n`;
+    let text = `*${isChurch ? settings.churchName.toUpperCase() : settings.cellName.toUpperCase()}*\n`;
+    text += isChurch ? `📍 Dirección: ${settings.churchLocation}\n` : `${settings.territory} • ${settings.cellLocation}\n`;
+    text += `*PROGRAMACIÓN MENSUAL — ${MONTH_NAMES[currentMonth].toUpperCase()} ${currentYear}*\n\n`;
 
-    const blocks = churchEvents.map(ev => {
+    const blocks = targetEvents.map(ev => {
       const lName = getMemberName(ev.leaderId) || 'Pendiente';
       const pName = getMemberName(ev.preacherId) || 'Pendiente';
       const isSunday = ev.type === 'Escuela Dominical' || ev.type === 'Cena del Señor';
@@ -527,14 +498,14 @@ export default function App() {
       let b = `📅 *${formatFriendlyDate(ev.date)}*\n`;
       b += `*${ev.title.toUpperCase()}*\n`;
 
-      if (isSunday) {
+      if (isChurch && isSunday) {
         b += `📖 9:00 a. m. Curso de Bautismo\n`;
         b += `🕕 10:00 a. m. Culto General\n`;
       } else {
         b += `🕕 Hora: ${formatFriendlyTime(ev.startTime)}\n`;
       }
 
-      b += `📍 Lugar: ${ev.location || settings.churchLocation || 'Templo Central'}\n`;
+      b += `📍 Lugar: ${ev.location || (isChurch ? settings.churchLocation : settings.cellLocation)}\n`;
       b += `👤 Dirige: ${lName}\n`;
       b += `📖 Predica: ${pName}`;
 
@@ -558,30 +529,33 @@ export default function App() {
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
   };
 
+  // 6. REGISTRO DE MIEMBRO ESTRICTAMENTE CONTEXTUAL
   const handleAddMember = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMemberName.trim()) return;
     const now = new Date().toISOString();
+
     await db.members.add({
       id: 'm_' + Date.now(),
       fullName: newMemberName.trim(),
       phone: newMemberPhone.trim() || undefined,
-      canLeadCell,
-      canPreachCell,
-      canLeadChurch,
-      canPreachChurch,
+      // Si estamos en Célula: solo guardamos capacidades de Célula
+      canLeadCell: !isChurch ? canLeadRole : false,
+      canPreachCell: !isChurch ? canPreachRole : false,
+      // Si estamos en Iglesia: solo guardamos capacidades de Iglesia
+      canLeadChurch: isChurch ? canLeadRole : false,
+      canPreachChurch: isChurch ? canPreachRole : false,
       isActive: true,
       createdAt: now,
       updatedAt: now
     });
+
     setNewMemberName('');
     setNewMemberPhone('');
-    setCanLeadCell(false);
-    setCanPreachCell(false);
-    setCanLeadChurch(false);
-    setCanPreachChurch(false);
+    setCanLeadRole(false);
+    setCanPreachRole(false);
     await loadAll();
-    showMsg('Hermano agregado al directorio.');
+    showMsg(`Hermano agregado para ${isChurch ? 'la Iglesia' : 'la Célula'}.`);
   };
 
   const handleDeleteMember = async (id: string, name: string) => {
@@ -593,73 +567,31 @@ export default function App() {
   };
 
   const ymCurrent = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
+
   const visibleEvents = events.filter(e => {
     if (!e.date.startsWith(ymCurrent)) return false;
-    return activeScope === 'celula' ? e.type === 'Servicio de célula' : e.type !== 'Servicio de célula';
+    return isChurch ? e.type !== 'Servicio de célula' : e.type === 'Servicio de célula';
   });
-
-  const isSelectedCell = selectedEvent?.type === 'Servicio de célula';
 
   return (
     <div style={{ maxWidth: '480px', margin: '0 auto', minHeight: '100vh', background: '#f1f5f9', paddingBottom: '75px', display: 'flex', flexDirection: 'column' }}>
       
       {/* 1. ENCABEZADO */}
-      <header style={{ background: '#0f172a', color: '#ffffff', padding: '12px 16px', borderBottom: '3px solid #b45309' }}>
+      <header style={{ background: '#0f172a', color: '#ffffff', padding: '14px 16px', borderBottom: '3px solid #b45309' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
-            <h1 style={{ margin: 0, fontSize: '1.02rem', fontWeight: 800 }}>
-              {activeScope === 'celula' ? settings.cellName : settings.churchName}
+            <h1 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800 }}>
+              {isChurch ? settings.churchName : settings.cellName}
             </h1>
-            <p style={{ margin: 0, fontSize: '0.72rem', color: '#f59e0b', fontWeight: 600 }}>
-              {activeScope === 'celula' ? `${settings.territory} • ${settings.cellLocation}` : `Templo Central • ${settings.churchLocation}`}
+            <p style={{ margin: 0, fontSize: '0.74rem', color: '#f59e0b', fontWeight: 600 }}>
+              {isChurch ? settings.churchLocation : `${settings.territory} • ${settings.cellLocation}`}
             </p>
           </div>
-          <span style={{ fontSize: '0.68rem', background: activeScope === 'celula' ? '#166534' : '#1e40af', padding: '4px 8px', borderRadius: '6px', color: '#fff', fontWeight: 700 }}>
-            {activeScope === 'celula' ? 'CÉLULA' : 'IGLESIA'}
+          <span style={{ fontSize: '0.68rem', background: isChurch ? '#1e40af' : '#166534', padding: '4px 8px', borderRadius: '6px', color: '#fff', fontWeight: 700 }}>
+            {isChurch ? 'IGLESIA' : 'CÉLULA'}
           </span>
         </div>
       </header>
-
-      {/* 2. CONMUTADOR DE ÁMBITO (CÉLULA vs IGLESIA) */}
-      <div style={{ display: 'flex', background: '#1e293b', padding: '6px 12px', gap: '8px' }}>
-        <button
-          onClick={() => setActiveScope('celula')}
-          style={{
-            flex: 1,
-            padding: '9px',
-            borderRadius: '8px',
-            border: 'none',
-            background: activeScope === 'celula' ? '#047857' : 'transparent',
-            color: activeScope === 'celula' ? '#ffffff' : '#94a3b8',
-            fontWeight: 800,
-            fontSize: '0.78rem',
-            cursor: 'pointer',
-            transition: 'all 0.2s ease',
-            boxShadow: activeScope === 'celula' ? '0 2px 4px rgba(0,0,0,0.2)' : 'none'
-          }}
-        >
-          🏠 Modo Célula (Miércoles)
-        </button>
-
-        <button
-          onClick={() => setActiveScope('iglesia')}
-          style={{
-            flex: 1,
-            padding: '9px',
-            borderRadius: '8px',
-            border: 'none',
-            background: activeScope === 'iglesia' ? '#1d4ed8' : 'transparent',
-            color: activeScope === 'iglesia' ? '#ffffff' : '#94a3b8',
-            fontWeight: 800,
-            fontSize: '0.78rem',
-            cursor: 'pointer',
-            transition: 'all 0.2s ease',
-            boxShadow: activeScope === 'iglesia' ? '0 2px 4px rgba(0,0,0,0.2)' : 'none'
-          }}
-        >
-          🏛️ Modo Iglesia (Cultos)
-        </button>
-      </div>
 
       {notice && (
         <div style={{ background: '#172554', color: '#fff', padding: '9px 12px', fontSize: '0.8rem', textAlign: 'center', fontWeight: 600 }}>
@@ -667,7 +599,7 @@ export default function App() {
         </div>
       )}
 
-      {/* 3. CONTENIDO PRINCIPAL */}
+      {/* 2. CONTENIDO PRINCIPAL */}
       <main style={{ padding: '14px', flex: 1 }}>
 
         {/* 1. CALENDARIO */}
@@ -678,18 +610,17 @@ export default function App() {
               <div style={{ textAlign: 'center' }}>
                 <span style={{ fontSize: '1rem', fontWeight: 800, color: '#0f172a' }}>{MONTH_NAMES[currentMonth]} {currentYear}</span>
                 <span style={{ display: 'block', fontSize: '0.7rem', color: '#64748b' }}>
-                  {visibleEvents.length} culto(s) en {activeScope === 'celula' ? 'Célula' : 'Iglesia'}
+                  {visibleEvents.length} actividad(es) de {isChurch ? 'la Iglesia' : 'la Célula'}
                 </span>
               </div>
               <button onClick={() => { if (currentMonth === 11) { setCurrentMonth(0); setCurrentYear(y => y + 1); } else { setCurrentMonth(m => m + 1); } }} style={{ background: '#f1f5f9', border: '1px solid #cbd5e1', padding: '6px 12px', borderRadius: '8px', cursor: 'pointer', fontWeight: 700 }}>▶</button>
             </div>
 
-            {/* UN SOLO BOTÓN PRINCIPAL */}
             <button
               onClick={handleGenerateAndAssign}
               style={{
                 width: '100%',
-                background: activeScope === 'celula' ? '#065f46' : '#1e3a8a',
+                background: isChurch ? '#1e3a8a' : '#065f46',
                 color: '#fff',
                 border: 'none',
                 padding: '13px',
@@ -706,17 +637,14 @@ export default function App() {
               }}
             >
               <span>⚡</span>
-              <span>
-                {activeScope === 'celula' ? 'Generar y Asignar Mes (Célula)' : 'Generar y Asignar Mes (Iglesia)'}
-              </span>
+              <span>{isChurch ? 'Generar y Asignar Mes (Iglesia)' : 'Generar y Asignar Mes (Célula)'}</span>
             </button>
 
-            {/* Botón WhatsApp */}
             <button
-              onClick={activeScope === 'celula' ? handleShareCellOnly : handleShareChurchOnly}
+              onClick={handleShareWhatsApp}
               style={{
                 width: '100%',
-                background: activeScope === 'celula' ? '#047857' : '#1d4ed8',
+                background: '#059669',
                 color: '#fff',
                 border: 'none',
                 padding: '12px',
@@ -733,23 +661,19 @@ export default function App() {
               }}
             >
               <span>📲</span>
-              <span>
-                {activeScope === 'celula' ? 'Compartir CÉLULA por WhatsApp (Miércoles)' : 'Compartir IGLESIA por WhatsApp (Cultos Generales)'}
-              </span>
+              <span>Compartir Programación por WhatsApp</span>
             </button>
 
-            {/* Lista de cultos */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {visibleEvents.length === 0 ? (
                 <div style={{ background: '#fff', padding: '24px', borderRadius: '12px', textAlign: 'center', color: '#64748b', fontSize: '0.85rem' }}>
-                  No hay cultos programados en este mes para {activeScope === 'celula' ? 'la Célula' : 'la Iglesia'}.<br/>
+                  No hay cultos programados en este mes.<br/>
                   Pulsa arriba <strong>"⚡ Generar y Asignar Mes"</strong> para crearlos y sortearlos en 1 segundo.
                 </div>
               ) : (
                 visibleEvents.map(ev => {
                   const leaderName = getMemberName(ev.leaderId);
                   const preacherName = getMemberName(ev.preacherId);
-                  const isCell = ev.type === 'Servicio de célula';
                   const isCena = ev.type === 'Cena del Señor';
                   const isSunday = ev.type === 'Escuela Dominical' || isCena;
 
@@ -759,7 +683,7 @@ export default function App() {
                       style={{
                         background: '#ffffff',
                         borderRadius: '12px',
-                        border: isCena ? '2px solid #b45309' : isCell ? '2px solid #047857' : '1px solid #cbd5e1',
+                        border: isCena ? '2px solid #b45309' : '1px solid #cbd5e1',
                         padding: '14px',
                         boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
                       }}
@@ -770,15 +694,15 @@ export default function App() {
                       </div>
 
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                        <span style={{ fontSize: '0.82rem', fontWeight: 700, color: isCell ? '#047857' : isCena ? '#b45309' : '#1e3a8a' }}>
-                          {isCell ? '🏠 ' + ev.title : isCena ? '🍷 ' + ev.title : '⛪ ' + ev.title}
+                        <span style={{ fontSize: '0.82rem', fontWeight: 700, color: isCena ? '#b45309' : '#1e3a8a' }}>
+                          {isCena ? '🍷 ' + ev.title : ev.title}
                         </span>
                         <span style={{ fontSize: '0.68rem', background: '#f1f5f9', padding: '2px 6px', borderRadius: '4px', color: '#475569' }}>
-                          {ev.location || (isCell ? settings.cellLocation : settings.churchLocation)}
+                          {ev.location || (isChurch ? settings.churchLocation : settings.cellLocation)}
                         </span>
                       </div>
 
-                      {isSunday && (
+                      {isChurch && isSunday && (
                         <div style={{ background: '#f8fafc', padding: '4px 8px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.7rem', color: '#475569', marginBottom: '8px', fontWeight: 600 }}>
                           📖 9:00 a. m. Curso de Bautismo (previo a la Escuela)
                         </div>
@@ -827,21 +751,23 @@ export default function App() {
         {tab === 'inicio' && (
           <div>
             <div style={{ background: 'linear-gradient(135deg, #0f172a, #172554)', color: '#fff', padding: '18px', borderRadius: '16px', marginBottom: '16px', border: '1px solid #b45309' }}>
-              <span style={{ fontSize: '0.7rem', color: '#f59e0b', textTransform: 'uppercase', fontWeight: 700 }}>Ámbito Activo</span>
+              <span style={{ fontSize: '0.7rem', color: '#f59e0b', textTransform: 'uppercase', fontWeight: 700 }}>
+                {isChurch ? 'Iglesia Activa' : 'Célula Activa'}
+              </span>
               <h2 style={{ margin: '6px 0', fontSize: '1.2rem' }}>
-                {activeScope === 'celula' ? settings.cellName : settings.churchName}
+                {isChurch ? settings.churchName : settings.cellName}
               </h2>
               <p style={{ margin: 0, fontSize: '0.85rem', color: '#cbd5e1' }}>
-                {activeScope === 'celula' ? `${settings.territory} • ${settings.cellLocation}` : `Templo Central • ${settings.churchLocation}`}
+                {isChurch ? settings.churchLocation : `${settings.territory} • ${settings.cellLocation}`}
               </p>
               <button onClick={() => setTab('calendario')} style={{ marginTop: '14px', background: '#b45309', border: 'none', color: '#fff', padding: '9px 16px', borderRadius: '8px', fontSize: '0.8rem', fontWeight: 700, cursor: 'pointer' }}>
-                📅 Ver Calendario de {activeScope === 'celula' ? 'Célula' : 'Iglesia'}
+                📅 Ver Calendario
               </button>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
               <div style={{ background: '#fff', padding: '14px', borderRadius: '12px', border: '1px solid #cbd5e1' }}>
-                <span style={{ fontSize: '0.75rem', color: '#64748b' }}>Hermanos registrados</span>
+                <span style={{ fontSize: '0.75rem', color: '#64748b' }}>Hermanos en lista</span>
                 <p style={{ margin: '4px 0 0', fontSize: '1.5rem', fontWeight: 800, color: '#0f172a' }}>{members.length}</p>
               </div>
               <div style={{ background: '#fff', padding: '14px', borderRadius: '12px', border: '1px solid #cbd5e1' }}>
@@ -852,128 +778,189 @@ export default function App() {
           </div>
         )}
 
-        {/* 3. MIEMBROS */}
+        {/* 3. MIEMBROS (ESTRICTAMENTE CONTEXTUAL) */}
         {tab === 'miembros' && (
           <div>
             <form onSubmit={handleAddMember} style={{ background: '#fff', padding: '14px', borderRadius: '12px', border: '1px solid #cbd5e1', marginBottom: '14px' }}>
-              <h3 style={{ margin: '0 0 10px', fontSize: '0.9rem', fontWeight: 800 }}>+ Registrar Nuevo Hermano</h3>
+              <h3 style={{ margin: '0 0 10px', fontSize: '0.9rem', fontWeight: 800 }}>
+                + Registrar Hermano ({isChurch ? 'Iglesia' : 'Célula'})
+              </h3>
               <input type="text" placeholder="Nombre completo *" value={newMemberName} onChange={e => setNewMemberName(e.target.value)} required style={{ width: '100%', padding: '9px', marginBottom: '8px', boxSizing: 'border-box', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
               <input type="text" placeholder="Teléfono (opcional)" value={newMemberPhone} onChange={e => setNewMemberPhone(e.target.value)} style={{ width: '100%', padding: '9px', marginBottom: '10px', boxSizing: 'border-box', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
 
-              <div style={{ background: '#f0fdf4', padding: '10px', borderRadius: '8px', marginBottom: '8px', border: '1px solid #bbf7d0' }}>
-                <span style={{ display: 'block', fontSize: '0.72rem', fontWeight: 800, color: '#166534', marginBottom: '6px' }}>🏠 Capacidades en CÉLULA:</span>
-                <div style={{ display: 'flex', gap: '16px', fontSize: '0.78rem' }}>
-                  <label><input type="checkbox" checked={canLeadCell} onChange={e => setCanLeadCell(e.target.checked)} /> Puede dirigir</label>
-                  <label><input type="checkbox" checked={canPreachCell} onChange={e => setCanPreachCell(e.target.checked)} /> Puede predicar</label>
+              {/* SI ES IGLESIA: SOLO CAPACIDADES DE IGLESIA */}
+              {isChurch ? (
+                <div style={{ background: '#eff6ff', padding: '10px', borderRadius: '8px', marginBottom: '12px', border: '1px solid #bfdbfe' }}>
+                  <span style={{ display: 'block', fontSize: '0.74rem', fontWeight: 800, color: '#1e40af', marginBottom: '6px' }}>
+                    🏛️ Capacidades en la IGLESIA:
+                  </span>
+                  <div style={{ display: 'flex', gap: '16px', fontSize: '0.78rem' }}>
+                    <label><input type="checkbox" checked={canLeadRole} onChange={e => setCanLeadRole(e.target.checked)} /> Puede dirigir en la iglesia</label>
+                    <label><input type="checkbox" checked={canPreachRole} onChange={e => setCanPreachRole(e.target.checked)} /> Puede predicar en la iglesia</label>
+                  </div>
                 </div>
-              </div>
-
-              <div style={{ background: '#eff6ff', padding: '10px', borderRadius: '8px', marginBottom: '12px', border: '1px solid #bfdbfe' }}>
-                <span style={{ display: 'block', fontSize: '0.72rem', fontWeight: 800, color: '#1e40af', marginBottom: '6px' }}>🏛️ Capacidades en IGLESIA:</span>
-                <div style={{ display: 'flex', gap: '16px', fontSize: '0.78rem' }}>
-                  <label><input type="checkbox" checked={canLeadChurch} onChange={e => setCanLeadChurch(e.target.checked)} /> Puede dirigir</label>
-                  <label><input type="checkbox" checked={canPreachChurch} onChange={e => setCanPreachChurch(e.target.checked)} /> Puede predicar</label>
+              ) : (
+                /* SI ES CÉLULA: SOLO CAPACIDADES DE CÉLULA */
+                <div style={{ background: '#f0fdf4', padding: '10px', borderRadius: '8px', marginBottom: '12px', border: '1px solid #bbf7d0' }}>
+                  <span style={{ display: 'block', fontSize: '0.74rem', fontWeight: 800, color: '#166534', marginBottom: '6px' }}>
+                    🏠 Capacidades en la CÉLULA:
+                  </span>
+                  <div style={{ display: 'flex', gap: '16px', fontSize: '0.78rem' }}>
+                    <label><input type="checkbox" checked={canLeadRole} onChange={e => setCanLeadRole(e.target.checked)} /> Puede dirigir en la célula</label>
+                    <label><input type="checkbox" checked={canPreachRole} onChange={e => setCanPreachRole(e.target.checked)} /> Puede predicar en la célula</label>
+                  </div>
                 </div>
-              </div>
+              )}
 
               <button type="submit" style={{ width: '100%', background: '#0f172a', color: '#fff', border: 'none', padding: '10px', borderRadius: '8px', fontWeight: 700, fontSize: '0.8rem', cursor: 'pointer' }}>Guardar Hermano</button>
             </form>
 
+            {/* Listado de Miembros contextual */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {members.map(m => (
-                <div key={m.id} style={{ background: '#fff', padding: '12px', borderRadius: '10px', border: '1px solid #cbd5e1', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <div style={{ fontWeight: 800, fontSize: '0.88rem' }}>{m.fullName}</div>
-                    {m.phone && <div style={{ fontSize: '0.75rem', color: '#64748b' }}>📞 {m.phone}</div>}
+              {members.map(m => {
+                const canL = memberCanLead(m);
+                const canP = memberCanPreach(m);
 
-                    <div style={{ display: 'flex', gap: '4px', marginTop: '4px', flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: '0.62rem', background: '#dcfce7', color: '#166534', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>
-                        Célula: {[m.canLeadCell ? 'Dirige' : '', m.canPreachCell ? 'Predica' : ''].filter(Boolean).join(' / ') || 'Sin rol'}
-                      </span>
-                      <span style={{ fontSize: '0.62rem', background: '#dbeafe', color: '#1e40af', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>
-                        Iglesia: {[m.canLeadChurch ? 'Dirige' : '', m.canPreachChurch ? 'Predica' : ''].filter(Boolean).join(' / ') || 'Sin rol'}
-                      </span>
+                return (
+                  <div key={m.id} style={{ background: '#fff', padding: '12px', borderRadius: '10px', border: '1px solid #cbd5e1', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <div style={{ fontWeight: 800, fontSize: '0.88rem' }}>{m.fullName}</div>
+                      {m.phone && <div style={{ fontSize: '0.75rem', color: '#64748b' }}>📞 {m.phone}</div>}
+
+                      {/* Solo etiquetas pertinentes */}
+                      <div style={{ display: 'flex', gap: '4px', marginTop: '4px' }}>
+                        {canL && (
+                          <span style={{ background: isChurch ? '#dbeafe' : '#dcfce7', color: isChurch ? '#1e40af' : '#166534', fontSize: '0.65rem', padding: '2px 8px', borderRadius: '4px', fontWeight: 700 }}>
+                            ✓ Dirige
+                          </span>
+                        )}
+                        {canP && (
+                          <span style={{ background: '#fef3c7', color: '#92400e', fontSize: '0.65rem', padding: '2px 8px', borderRadius: '4px', fontWeight: 700 }}>
+                            ✓ Predica
+                          </span>
+                        )}
+                        {!canL && !canP && (
+                          <span style={{ background: '#f1f5f9', color: '#64748b', fontSize: '0.65rem', padding: '2px 6px', borderRadius: '4px' }}>
+                            Miembro
+                          </span>
+                        )}
+                      </div>
                     </div>
+                    <button onClick={() => handleDeleteMember(m.id, m.fullName)} style={{ background: '#fee2e2', color: '#991b1b', border: 'none', padding: '6px 10px', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer' }}>
+                      Eliminar
+                    </button>
                   </div>
-                  <button onClick={() => handleDeleteMember(m.id, m.fullName)} style={{ background: '#fee2e2', color: '#991b1b', border: 'none', padding: '6px 10px', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer' }}>
-                    Eliminar
-                  </button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
 
-        {/* 4. AJUSTES */}
+        {/* 4. AJUSTES CONFIGURABLES */}
         {tab === 'ajustes' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
             <form onSubmit={handleSaveSettings} style={{ background: '#fff', padding: '16px', borderRadius: '12px', border: '1px solid #cbd5e1' }}>
               <h3 style={{ margin: '0 0 12px', fontSize: '1rem', fontWeight: 800, color: '#0f172a' }}>⚙️ Configuración del Sistema</h3>
 
-              <div style={{ background: '#f0fdf4', padding: '12px', borderRadius: '8px', border: '1px solid #bbf7d0', marginBottom: '12px' }}>
-                <span style={{ display: 'block', fontSize: '0.8rem', fontWeight: 800, color: '#166534', marginBottom: '8px' }}>🏠 Datos de la CÉLULA:</span>
+              {/* Selector de Entidad */}
+              <div style={{ background: '#f1f5f9', padding: '12px', borderRadius: '10px', border: '1px solid #cbd5e1', marginBottom: '14px' }}>
+                <span style={{ display: 'block', fontSize: '0.78rem', fontWeight: 800, color: '#0f172a', marginBottom: '8px' }}>
+                  ¿Qué deseas administrar en esta app?
+                </span>
+                <div style={{ display: 'flex', gap: '14px' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: 700, cursor: 'pointer' }}>
+                    <input
+                      type="radio"
+                      name="entityType"
+                      value="iglesia"
+                      checked={formEntityType === 'iglesia'}
+                      onChange={() => setFormEntityType('iglesia')}
+                    />
+                    🏛️ Iglesia
+                  </label>
 
-                <div style={{ marginBottom: '8px' }}>
-                  <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: '#334155', marginBottom: '2px' }}>Nombre de la Célula:</label>
-                  <input type="text" value={formCellName} onChange={e => setFormCellName(e.target.value)} required style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
-                </div>
-
-                <div style={{ marginBottom: '8px' }}>
-                  <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: '#334155', marginBottom: '2px' }}>Territorio o Distrito:</label>
-                  <input type="text" value={formTerritory} onChange={e => setFormTerritory(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
-                </div>
-
-                <div style={{ marginBottom: '8px' }}>
-                  <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: '#334155', marginBottom: '2px' }}>Lugar habitual de Célula:</label>
-                  <input type="text" value={formCellLocation} onChange={e => setFormCellLocation(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: '#334155', marginBottom: '2px' }}>Hora habitual de Célula (Miércoles):</label>
-                  <input type="time" value={formCellTime} onChange={e => setFormCellTime(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
-                </div>
-              </div>
-
-              <div style={{ background: '#eff6ff', padding: '12px', borderRadius: '8px', border: '1px solid #bfdbfe', marginBottom: '14px' }}>
-                <span style={{ display: 'block', fontSize: '0.8rem', fontWeight: 800, color: '#1e40af', marginBottom: '8px' }}>🏛️ Datos de la IGLESIA:</span>
-
-                <div style={{ marginBottom: '8px' }}>
-                  <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: '#334155', marginBottom: '2px' }}>Nombre oficial de la Iglesia:</label>
-                  <input type="text" value={formChurchName} onChange={e => setFormChurchName(e.target.value)} required style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: '#334155', marginBottom: '2px' }}>Dirección física del Templo:</label>
-                  <input type="text" value={formChurchLocation} onChange={e => setFormChurchLocation(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: 700, cursor: 'pointer' }}>
+                    <input
+                      type="radio"
+                      name="entityType"
+                      value="celula"
+                      checked={formEntityType === 'celula'}
+                      onChange={() => setFormEntityType('celula')}
+                    />
+                    🏠 Célula
+                  </label>
                 </div>
               </div>
 
-              <button type="submit" style={{ width: '100%', background: '#0f172a', color: '#fff', border: 'none', padding: '11px', borderRadius: '8px', fontWeight: 800, fontSize: '0.82rem', cursor: 'pointer' }}>
-                💾 Guardar Todos los Cambios
+              {formEntityType === 'iglesia' ? (
+                <div style={{ background: '#eff6ff', padding: '12px', borderRadius: '8px', border: '1px solid #bfdbfe', marginBottom: '14px' }}>
+                  <span style={{ display: 'block', fontSize: '0.8rem', fontWeight: 800, color: '#1e40af', marginBottom: '8px' }}>
+                    🏛️ Datos de la IGLESIA:
+                  </span>
+
+                  <div style={{ marginBottom: '8px' }}>
+                    <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: '#334155', marginBottom: '2px' }}>Nombre oficial de la Iglesia:</label>
+                    <input type="text" value={formChurchName} onChange={e => setFormChurchName(e.target.value)} required style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: '#334155', marginBottom: '2px' }}>Dirección física del Templo Central:</label>
+                    <input type="text" value={formChurchLocation} onChange={e => setFormChurchLocation(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
+                  </div>
+                </div>
+              ) : (
+                <div style={{ background: '#f0fdf4', padding: '12px', borderRadius: '8px', border: '1px solid #bbf7d0', marginBottom: '14px' }}>
+                  <span style={{ display: 'block', fontSize: '0.8rem', fontWeight: 800, color: '#166534', marginBottom: '8px' }}>
+                    🏠 Datos de la CÉLULA:
+                  </span>
+
+                  <div style={{ marginBottom: '8px' }}>
+                    <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: '#334155', marginBottom: '2px' }}>Nombre de la Célula:</label>
+                    <input type="text" value={formCellName} onChange={e => setFormCellName(e.target.value)} required style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
+                  </div>
+
+                  <div style={{ marginBottom: '8px' }}>
+                    <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: '#334155', marginBottom: '2px' }}>Territorio o Identificación:</label>
+                    <input type="text" value={formTerritory} onChange={e => setFormTerritory(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
+                  </div>
+
+                  <div style={{ marginBottom: '8px' }}>
+                    <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: '#334155', marginBottom: '2px' }}>Casa / Lugar de reunión:</label>
+                    <input type="text" value={formCellLocation} onChange={e => setFormCellLocation(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: '#334155', marginBottom: '2px' }}>Día de reunión:</label>
+                      <select value={formCellDay} onChange={e => setFormCellDay(Number(e.target.value))} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
+                        {DAY_NAMES.map((name, idx) => (
+                          <option key={idx} value={idx}>{name}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: '#334155', marginBottom: '2px' }}>Hora de reunión:</label>
+                      <input type="time" value={formCellTime} onChange={e => setFormCellTime(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }} />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <button type="submit" style={{ width: '100%', background: '#0f172a', color: '#fff', border: 'none', padding: '12px', borderRadius: '8px', fontWeight: 800, fontSize: '0.84rem', cursor: 'pointer' }}>
+                💾 Guardar Configuración
               </button>
             </form>
 
             <div style={{ background: '#fff', padding: '16px', borderRadius: '12px', border: '1px solid #cbd5e1' }}>
               <h3 style={{ margin: '0 0 8px', fontSize: '0.9rem', fontWeight: 800 }}>📦 Copias de Seguridad (JSON)</h3>
-              <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0 0 12px' }}>
-                Guarda una copia en Google Drive, WhatsApp o en tu teléfono para no perder ningún dato.
-              </p>
+              <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0 0 12px' }}>Guarda tu respaldo en Google Drive, WhatsApp o en tu teléfono.</p>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 <button
                   type="button"
                   onClick={handleExportBackup}
-                  style={{
-                    width: '100%',
-                    background: '#047857',
-                    color: '#fff',
-                    border: 'none',
-                    padding: '11px',
-                    borderRadius: '8px',
-                    fontWeight: 800,
-                    fontSize: '0.8rem',
-                    cursor: 'pointer'
-                  }}
+                  style={{ width: '100%', background: '#047857', color: '#fff', border: 'none', padding: '11px', borderRadius: '8px', fontWeight: 800, fontSize: '0.8rem', cursor: 'pointer' }}
                 >
                   📥 Guardar / Compartir Copia JSON
                 </button>
@@ -986,17 +973,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setShowPasteModal(true)}
-                  style={{
-                    width: '100%',
-                    background: '#f8fafc',
-                    color: '#475569',
-                    border: '1px dashed #cbd5e1',
-                    padding: '9px',
-                    borderRadius: '8px',
-                    fontWeight: 700,
-                    fontSize: '0.75rem',
-                    cursor: 'pointer'
-                  }}
+                  style={{ width: '100%', background: '#f8fafc', color: '#475569', border: '1px dashed #cbd5e1', padding: '9px', borderRadius: '8px', fontWeight: 700, fontSize: '0.75rem', cursor: 'pointer' }}
                 >
                   📋 O Restaurar pegando texto JSON
                 </button>
@@ -1011,14 +988,12 @@ export default function App() {
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 120 }}>
           <div style={{ background: '#fff', width: '100%', maxWidth: '380px', borderRadius: '16px', padding: '18px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
             <h3 style={{ margin: '0 0 8px', fontSize: '0.95rem', fontWeight: 800 }}>Pegar Respaldo JSON</h3>
-            <p style={{ margin: '0 0 10px', fontSize: '0.72rem', color: '#64748b' }}>
-              Pega aquí el texto completo de tu copia de seguridad JSON:
-            </p>
+            <p style={{ margin: '0 0 10px', fontSize: '0.72rem', color: '#64748b' }}>Pega el texto de tu respaldo JSON:</p>
             <textarea
               rows={8}
               value={pastedJsonText}
               onChange={e => setPastedJsonText(e.target.value)}
-              placeholder='{"schemaVersion": 2, ...}'
+              placeholder='{"schemaVersion": 3, ...}'
               style={{ width: '100%', padding: '8px', fontSize: '0.7rem', fontFamily: 'monospace', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box', marginBottom: '12px' }}
             />
             <div style={{ display: 'flex', gap: '8px' }}>
@@ -1026,7 +1001,7 @@ export default function App() {
                 Cancelar
               </button>
               <button onClick={handleRestorePastedText} style={{ flex: 1, padding: '10px', background: '#0f172a', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: 'pointer' }}>
-                Restaurar Datos
+                Restaurar
               </button>
             </div>
           </div>
@@ -1042,34 +1017,25 @@ export default function App() {
 
             <form onSubmit={handleSaveEvent} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               <div>
-                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, marginBottom: '4px' }}>
-                  👤 Quién Dirige ({isSelectedCell ? 'Célula' : 'Iglesia'}):
-                </label>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, marginBottom: '4px' }}>👤 Quién Dirige:</label>
                 <select value={modalLeaderId} onChange={e => setModalLeaderId(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
                   <option value="">(Pendiente)</option>
                   {members.map(m => (
-                    <option key={m.id} value={m.id}>
-                      {m.fullName} {isSelectedCell ? (m.canLeadCell ? '✓' : '') : (m.canLeadChurch ? '✓' : '')}
-                    </option>
+                    <option key={m.id} value={m.id}>{m.fullName} {memberCanLead(m) ? '✓' : ''}</option>
                   ))}
                 </select>
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, marginBottom: '4px' }}>
-                  📖 Quién Predica ({isSelectedCell ? 'Célula' : 'Iglesia'}):
-                </label>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, marginBottom: '4px' }}>📖 Quién Predica:</label>
                 <select value={modalPreacherId} onChange={e => setModalPreacherId(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
                   <option value="">(Pendiente)</option>
                   {members.map(m => (
-                    <option key={m.id} value={m.id}>
-                      {m.fullName} {isSelectedCell ? (m.canPreachCell ? '✓' : '') : (m.canPreachChurch ? '✓' : '')}
-                    </option>
+                    <option key={m.id} value={m.id}>{m.fullName} {memberCanPreach(m) ? '✓' : ''}</option>
                   ))}
                 </select>
               </div>
 
-              {/* Cena del Señor */}
               {selectedEvent.type === 'Cena del Señor' && (
                 <div style={{ background: '#fef3c7', padding: '12px', borderRadius: '10px', border: '1px solid #fde68a', display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   <span style={{ fontSize: '0.8rem', fontWeight: 800, color: '#92400e' }}>🍞🍷 Asignaciones de la Cena del Señor:</span>
@@ -1152,7 +1118,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Navegación Inferior */}
+      {/* Barra de Navegación Inferior */}
       <nav style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: '#ffffff', borderTop: '1px solid #cbd5e1', display: 'flex', justifyContent: 'space-around', padding: '8px 0', maxWidth: '480px', margin: '0 auto', zIndex: 50 }}>
         {[
           { id: 'calendario', label: 'Calendario', icon: '📅' },
