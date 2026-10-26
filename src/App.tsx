@@ -1,9 +1,13 @@
+$utf8NoBom = New-Object System.Text.UTF8Encoding $false
+
+$appCode = @'
 import React, { useState, useEffect } from 'react';
 import { db, DEFAULT_SETTINGS } from './db';
 import { Member, CellEvent, AppSettings } from './types';
 import { MONTH_NAMES } from './services/dateUtils';
 
 export default function App() {
+  const [activeScope, setActiveScope] = useState<'celula' | 'iglesia'>('celula');
   const [tab, setTab] = useState<'calendario' | 'inicio' | 'miembros' | 'ajustes'>('calendario');
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [members, setMembers] = useState<Member[]>([]);
@@ -14,7 +18,7 @@ export default function App() {
   const [currentYear, setCurrentYear] = useState(today.getFullYear());
   const [currentMonth, setCurrentMonth] = useState(today.getMonth());
 
-  // Formulario de Ajustes (Célula e Iglesia)
+  // Formulario de Ajustes
   const [formCellName, setFormCellName] = useState('');
   const [formTerritory, setFormTerritory] = useState('');
   const [formCellLocation, setFormCellLocation] = useState('');
@@ -22,7 +26,11 @@ export default function App() {
   const [formChurchName, setFormChurchName] = useState('');
   const [formChurchLocation, setFormChurchLocation] = useState('');
 
-  // Modal de edición de culto
+  // Modal para restaurar pegando texto JSON
+  const [showPasteModal, setShowPasteModal] = useState(false);
+  const [pastedJsonText, setPastedJsonText] = useState('');
+
+  // Modal de edición manual de culto
   const [selectedEvent, setSelectedEvent] = useState<CellEvent | null>(null);
   const [modalLeaderId, setModalLeaderId] = useState<string>('');
   const [modalPreacherId, setModalPreacherId] = useState<string>('');
@@ -35,7 +43,7 @@ export default function App() {
   const [modalTime, setModalTime] = useState<string>('');
   const [modalStatus, setModalStatus] = useState<'Programado' | 'Realizado' | 'Cancelado'>('Programado');
 
-  // Formulario de Miembro con capacidades separadas
+  // Formulario de Miembro
   const [newMemberName, setNewMemberName] = useState('');
   const [newMemberPhone, setNewMemberPhone] = useState('');
   const [canLeadCell, setCanLeadCell] = useState(false);
@@ -99,7 +107,7 @@ export default function App() {
     return `${dayNames[dt.getDay()]} ${d} de ${MONTH_NAMES[m - 1]}`;
   };
 
-  // 1. Guardar Ajustes separados de Célula e Iglesia
+  // 1. Guardar Ajustes
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     const updated: AppSettings = {
@@ -114,307 +122,322 @@ export default function App() {
     };
     await db.settings.put(updated);
     setSettings(updated);
-    showMsg('¡Ajustes de célula e iglesia guardados!');
+    showMsg('¡Ajustes guardados con éxito!');
   };
 
-  // Copias de seguridad
+  // 2. Exportar Copia de Seguridad
   const handleExportBackup = async () => {
-    const data = {
-      schemaVersion: 2,
-      exportedAt: new Date().toISOString(),
-      settings,
-      members,
-      events
-    };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `Copia_Seguridad_${new Date().toISOString().substring(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    showMsg('Copia de seguridad descargada.');
+    try {
+      const data = {
+        schemaVersion: 2,
+        exportedAt: new Date().toISOString(),
+        settings,
+        members,
+        events
+      };
+      const jsonStr = JSON.stringify(data, null, 2);
+
+      if (navigator.share) {
+        try {
+          await navigator.share({
+            title: 'Copia_Seguridad_Iglesia.json',
+            text: jsonStr
+          });
+          showMsg('Copia exportada con éxito.');
+          return;
+        } catch (e: any) {
+          if (e.name === 'AbortError') return;
+        }
+      }
+
+      try {
+        const blob = new Blob([jsonStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Copia_Seguridad_${new Date().toISOString().substring(0, 10)}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showMsg('Archivo de respaldo descargado.');
+      } catch {
+        await navigator.clipboard.writeText(jsonStr);
+        showMsg('Copia JSON copiada al portapapeles.');
+      }
+    } catch {
+      showMsg('Error al exportar la copia.');
+    }
   };
 
-  const handleRestoreBackup = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const processRestoreObject = async (parsed: any) => {
+    if (!parsed.settings || !Array.isArray(parsed.members) || !Array.isArray(parsed.events)) {
+      showMsg('El archivo no contiene un formato de respaldo válido.');
+      return;
+    }
+    if (window.confirm('¿Deseas restaurar esta copia? Reemplazará los datos actuales.')) {
+      await db.transaction('rw', [db.settings, db.members, db.events], async () => {
+        await db.settings.clear();
+        await db.members.clear();
+        await db.events.clear();
+        await db.settings.put(parsed.settings);
+        if (parsed.members.length > 0) await db.members.bulkAdd(parsed.members);
+        if (parsed.events.length > 0) await db.events.bulkAdd(parsed.events);
+      });
+      await loadAll();
+      showMsg('¡Copia de seguridad restaurada con éxito!');
+      setShowPasteModal(false);
+      setPastedJsonText('');
+    }
+  };
+
+  const handleRestoreFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = async () => {
       try {
         const parsed = JSON.parse(reader.result as string);
-        if (!parsed.settings || !Array.isArray(parsed.members) || !Array.isArray(parsed.events)) {
-          showMsg('El archivo no contiene un respaldo válido.');
-          return;
-        }
-        if (window.confirm('¿Deseas restaurar esta copia? Reemplazará los datos actuales.')) {
-          await db.transaction('rw', [db.settings, db.members, db.events], async () => {
-            await db.settings.clear();
-            await db.members.clear();
-            await db.events.clear();
-            await db.settings.put(parsed.settings);
-            if (parsed.members.length > 0) await db.members.bulkAdd(parsed.members);
-            if (parsed.events.length > 0) await db.events.bulkAdd(parsed.events);
-          });
-          await loadAll();
-          showMsg('¡Copia de seguridad restaurada con éxito!');
-        }
+        await processRestoreObject(parsed);
       } catch {
-        showMsg('Error al procesar el archivo.');
+        showMsg('Error al leer el archivo JSON.');
       }
     };
     reader.readAsText(file);
   };
 
-  // 2. Generar programación completa
-  const handleGenerateFullChurch = async () => {
+  const handleRestorePastedText = async () => {
+    try {
+      const parsed = JSON.parse(pastedJsonText);
+      await processRestoreObject(parsed);
+    } catch {
+      showMsg('El texto ingresado no es un JSON válido.');
+    }
+  };
+
+  // 3. GENERAR Y ASIGNAR MES (CORREGIDO: CURSO DE BAUTISMO INTEGRADO AL DOMINGO, SIN DIRIGENTE NI PREDICADOR SEPARADOS)
+  const handleGenerateAndAssign = async () => {
+    const isCellMode = activeScope === 'celula';
     const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
-    let count = 0;
     const nowIso = new Date().toISOString();
 
+    // Eliminar posibles eventos huérfanos previos de "Curso de bautismo" como evento separado
+    if (!isCellMode) {
+      const oldBautismos = await db.events.where('type').equals('Curso de bautismo').toArray();
+      for (const b of oldBautismos) {
+        await db.events.delete(b.id);
+      }
+    }
+
+    // PASO A: Crear los cultos del mes
     for (let day = 1; day <= daysInMonth; day++) {
       const dt = new Date(currentYear, currentMonth, day, 12, 0, 0);
-      const dayOfWeek = dt.getDay(); // 0 Dom, 2 Mar, 3 Mie, 5 Vie
+      const dayOfWeek = dt.getDay();
       const dayStr = String(day).padStart(2, '0');
       const monthStr = String(currentMonth + 1).padStart(2, '0');
       const date = `${currentYear}-${monthStr}-${dayStr}`;
 
-      // A. Martes y Viernes: Ayuno (10:00 am en Iglesia)
-      if (dayOfWeek === 2 || dayOfWeek === 5) {
-        const key = `ayuno_${date}`;
-        const exists = await db.events.where('generationKey').equals(key).first();
-        if (!exists) {
-          await db.events.add({
-            id: 'ev_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
-            title: 'Culto de Ayuno y Oración',
-            type: 'Ayuno',
-            date,
-            startTime: '10:00',
-            location: settings.churchLocation || 'Templo Central',
-            leaderId: null,
-            preacherId: null,
-            status: 'Programado',
-            origin: 'Generado',
-            generationKey: key,
-            createdAt: nowIso,
-            updatedAt: nowIso
-          });
-          count++;
+      if (isCellMode) {
+        // Solo Miércoles de Célula
+        if (dayOfWeek === 3) {
+          const key = `servicio_miercoles_${date}`;
+          const exists = await db.events.where('generationKey').equals(key).first();
+          if (!exists) {
+            await db.events.add({
+              id: 'ev_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+              title: 'Servicio de célula',
+              type: 'Servicio de célula',
+              date,
+              startTime: settings.cellTime || '18:00',
+              location: settings.cellLocation || 'Casa habitual',
+              leaderId: null,
+              preacherId: null,
+              status: 'Programado',
+              origin: 'Generado',
+              generationKey: key,
+              createdAt: nowIso,
+              updatedAt: nowIso
+            });
+          }
         }
-      }
-
-      // B. Miércoles: Servicio de Célula (18:00 en Casa)
-      if (dayOfWeek === 3) {
-        const key = `servicio_miercoles_${date}`;
-        const exists = await db.events.where('generationKey').equals(key).first();
-        if (!exists) {
-          await db.events.add({
-            id: 'ev_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
-            title: 'Servicio de célula',
-            type: 'Servicio de célula',
-            date,
-            startTime: settings.cellTime || '18:00',
-            location: settings.cellLocation || 'Casa habitual',
-            leaderId: null,
-            preacherId: null,
-            status: 'Programado',
-            origin: 'Generado',
-            generationKey: key,
-            createdAt: nowIso,
-            updatedAt: nowIso
-          });
-          count++;
-        }
-      }
-
-      // C. Domingos: Curso de Bautismo (9:00 am) y Escuela Dominical / Cena del Señor (10:00 am)
-      if (dayOfWeek === 0) {
-        const keyBautismo = `bautismo_${date}`;
-        const existsBautismo = await db.events.where('generationKey').equals(keyBautismo).first();
-        if (!existsBautismo) {
-          await db.events.add({
-            id: 'ev_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
-            title: 'Curso de Bautismo',
-            type: 'Curso de bautismo',
-            date,
-            startTime: '09:00',
-            location: settings.churchLocation || 'Templo Central',
-            leaderId: null,
-            preacherId: null,
-            status: 'Programado',
-            origin: 'Generado',
-            generationKey: keyBautismo,
-            createdAt: nowIso,
-            updatedAt: nowIso
-          });
-          count++;
+      } else {
+        // Cultos de Iglesia: Ayunos (Mar/Vie)
+        if (dayOfWeek === 2 || dayOfWeek === 5) {
+          const key = `ayuno_${date}`;
+          const exists = await db.events.where('generationKey').equals(key).first();
+          if (!exists) {
+            await db.events.add({
+              id: 'ev_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+              title: 'Culto de Ayuno y Oración',
+              type: 'Ayuno',
+              date,
+              startTime: '10:00',
+              location: settings.churchLocation || 'Templo Central',
+              leaderId: null,
+              preacherId: null,
+              status: 'Programado',
+              origin: 'Generado',
+              generationKey: key,
+              createdAt: nowIso,
+              updatedAt: nowIso
+            });
+          }
         }
 
-        const isLastSunday = (day + 7) > daysInMonth;
-        const keyDominical = isLastSunday ? `cena_senor_${date}` : `escuela_dominical_${date}`;
-        const existsDominical = await db.events.where('generationKey').equals(keyDominical).first();
+        // Domingos: UN SOLO CULTO con dirigentes (9:00 am Curso Bautismo, 10:00 am Culto)
+        if (dayOfWeek === 0) {
+          const isLastSunday = (day + 7) > daysInMonth;
+          const keyDominical = isLastSunday ? `cena_senor_${date}` : `escuela_dominical_${date}`;
+          const existsDominical = await db.events.where('generationKey').equals(keyDominical).first();
 
-        if (!existsDominical) {
-          await db.events.add({
-            id: 'ev_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
-            title: isLastSunday ? 'Cena del Señor' : 'Escuela Dominical',
-            type: isLastSunday ? 'Cena del Señor' : 'Escuela Dominical',
-            date,
-            startTime: '10:00',
-            location: settings.churchLocation || 'Templo Central',
-            leaderId: null,
-            preacherId: null,
-            breadPrayerMemberId: null,
-            winePrayerMemberId: null,
-            helper1Id: null,
-            helper2Id: null,
-            helper3Id: null,
-            status: 'Programado',
-            origin: 'Generado',
-            generationKey: keyDominical,
-            createdAt: nowIso,
-            updatedAt: nowIso
-          });
-          count++;
+          if (!existsDominical) {
+            await db.events.add({
+              id: 'ev_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+              title: isLastSunday ? 'Cena del Señor' : 'Escuela Dominical',
+              type: isLastSunday ? 'Cena del Señor' : 'Escuela Dominical',
+              date,
+              startTime: '10:00',
+              location: settings.churchLocation || 'Templo Central',
+              leaderId: null,
+              preacherId: null,
+              breadPrayerMemberId: null,
+              winePrayerMemberId: null,
+              helper1Id: null,
+              helper2Id: null,
+              helper3Id: null,
+              status: 'Programado',
+              origin: 'Generado',
+              generationKey: keyDominical,
+              createdAt: nowIso,
+              updatedAt: nowIso
+            });
+          }
         }
       }
     }
 
-    await loadAll();
-    showMsg(`¡Se generaron ${count} cultos de iglesia y célula para ${MONTH_NAMES[currentMonth]} ${currentYear}!`);
-  };
-
-  // 3. ASIGNACIÓN ALEATORIA DIFERENCIADA (CÉLULA VS. IGLESIA)
-  const handleAutoAssign = async () => {
+    // PASO B: Asignación equitativa y aleatoria de los cultos reales
+    const allCurrentEvents = await db.events.orderBy('date').toArray();
     const ym = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
-    const monthEvents = events.filter(e => e.date.startsWith(ym) && e.status === 'Programado');
+    const targetEvents = allCurrentEvents.filter(e =>
+      e.date.startsWith(ym) &&
+      e.status === 'Programado' &&
+      (isCellMode ? e.type === 'Servicio de célula' : e.type !== 'Servicio de célula')
+    );
+
     const activeMembers = members.filter(m => m.isActive);
 
-    if (activeMembers.length === 0) {
-      showMsg('Agrega miembros activos al directorio primero.');
-      return;
-    }
+    if (activeMembers.length > 0) {
+      const leadCount: Record<string, number> = {};
+      const preachCount: Record<string, number> = {};
+      const generalCount: Record<string, number> = {};
+      activeMembers.forEach(m => {
+        leadCount[m.id] = 0;
+        preachCount[m.id] = 0;
+        generalCount[m.id] = 0;
+      });
 
-    // Contadores para asegurar equidad
-    const leadCount: Record<string, number> = {};
-    const preachCount: Record<string, number> = {};
-    const generalCount: Record<string, number> = {};
-    activeMembers.forEach(m => {
-      leadCount[m.id] = 0;
-      preachCount[m.id] = 0;
-      generalCount[m.id] = 0;
-    });
+      let lastLeaderId: string | null = null;
+      let lastPreacherId: string | null = null;
 
-    let lastLeaderId: string | null = null;
-    let lastPreacherId: string | null = null;
+      const pickRandomMin = (
+        candidates: Member[],
+        counts: Record<string, number>,
+        excludeIds: (string | null | undefined)[] = [],
+        avoidConsecutiveId?: string | null
+      ) => {
+        const validExcludes = new Set(excludeIds.filter(Boolean));
+        let pool = candidates.filter(c => !validExcludes.has(c.id));
+        if (pool.length === 0) pool = candidates;
 
-    const pickRandomMin = (
-      candidates: Member[],
-      counts: Record<string, number>,
-      excludeIds: (string | null | undefined)[] = [],
-      avoidConsecutiveId?: string | null
-    ) => {
-      const validExcludes = new Set(excludeIds.filter(Boolean));
-      let pool = candidates.filter(c => !validExcludes.has(c.id));
-      if (pool.length === 0) pool = candidates;
+        if (pool.length > 1 && avoidConsecutiveId) {
+          const withoutConsecutive = pool.filter(c => c.id !== avoidConsecutiveId);
+          if (withoutConsecutive.length > 0) pool = withoutConsecutive;
+        }
 
-      if (pool.length > 1 && avoidConsecutiveId) {
-        const withoutConsecutive = pool.filter(c => c.id !== avoidConsecutiveId);
-        if (withoutConsecutive.length > 0) pool = withoutConsecutive;
-      }
+        if (pool.length === 0) return null;
 
-      if (pool.length === 0) return null;
-
-      const minCount = Math.min(...pool.map(c => counts[c.id] || 0));
-      const minCandidates = pool.filter(c => (counts[c.id] || 0) === minCount);
-      const randomIndex = Math.floor(Math.random() * minCandidates.length);
-      return minCandidates[randomIndex];
-    };
-
-    let assignedCount = 0;
-
-    for (const ev of monthEvents) {
-      const isCell = ev.type === 'Servicio de célula';
-
-      // Filtrar candidatos según si es CÉLULA o IGLESIA
-      const eligibleLeaders = activeMembers.filter(m =>
-        isCell ? (m.canLeadCell || (m as any).canLead) : (m.canLeadChurch || (m as any).canLead)
-      );
-      const eligiblePreachers = activeMembers.filter(m =>
-        isCell ? (m.canPreachCell || (m as any).canPreach) : (m.canPreachChurch || (m as any).canPreach)
-      );
-
-      // 1. Dirigente
-      const chosenLeader = pickRandomMin(
-        eligibleLeaders.length > 0 ? eligibleLeaders : activeMembers,
-        leadCount,
-        [],
-        lastLeaderId
-      );
-      const lId = chosenLeader ? chosenLeader.id : null;
-      if (lId) {
-        leadCount[lId] = (leadCount[lId] || 0) + 1;
-        generalCount[lId] = (generalCount[lId] || 0) + 1;
-        lastLeaderId = lId;
-      }
-
-      // 2. Predicador (sin repetir con dirigente)
-      const chosenPreacher = pickRandomMin(
-        eligiblePreachers.length > 0 ? eligiblePreachers : activeMembers,
-        preachCount,
-        [lId],
-        lastPreacherId
-      );
-      const pId = chosenPreacher ? chosenPreacher.id : null;
-      if (pId) {
-        preachCount[pId] = (preachCount[pId] || 0) + 1;
-        generalCount[pId] = (generalCount[pId] || 0) + 1;
-        lastPreacherId = pId;
-      }
-
-      const updates: Partial<CellEvent> = {
-        leaderId: lId,
-        preacherId: pId,
-        updatedAt: new Date().toISOString()
+        const minCount = Math.min(...pool.map(c => counts[c.id] || 0));
+        const minCandidates = pool.filter(c => (counts[c.id] || 0) === minCount);
+        const randomIndex = Math.floor(Math.random() * minCandidates.length);
+        return minCandidates[randomIndex];
       };
 
-      // 3. Cena del Señor (Pan, Vino y 3 Colaboradores de la Iglesia)
-      if (ev.type === 'Cena del Señor') {
-        const usedIds: (string | null)[] = [lId, pId];
+      for (const ev of targetEvents) {
+        const isCell = ev.type === 'Servicio de célula';
+        const eligibleLeaders = activeMembers.filter(m =>
+          isCell ? (m.canLeadCell || (m as any).canLead) : (m.canLeadChurch || (m as any).canLead)
+        );
+        const eligiblePreachers = activeMembers.filter(m =>
+          isCell ? (m.canPreachCell || (m as any).canPreach) : (m.canPreachChurch || (m as any).canPreach)
+        );
 
-        const breadMember = pickRandomMin(activeMembers, generalCount, usedIds);
-        const bId = breadMember ? breadMember.id : null;
-        if (bId) { generalCount[bId] = (generalCount[bId] || 0) + 1; usedIds.push(bId); }
+        const chosenLeader = pickRandomMin(
+          eligibleLeaders.length > 0 ? eligibleLeaders : activeMembers,
+          leadCount,
+          [],
+          lastLeaderId
+        );
+        const lId = chosenLeader ? chosenLeader.id : null;
+        if (lId) {
+          leadCount[lId] = (leadCount[lId] || 0) + 1;
+          generalCount[lId] = (generalCount[lId] || 0) + 1;
+          lastLeaderId = lId;
+        }
 
-        const wineMember = pickRandomMin(activeMembers, generalCount, usedIds);
-        const wId = wineMember ? wineMember.id : null;
-        if (wId) { generalCount[wId] = (generalCount[wId] || 0) + 1; usedIds.push(wId); }
+        const chosenPreacher = pickRandomMin(
+          eligiblePreachers.length > 0 ? eligiblePreachers : activeMembers,
+          preachCount,
+          [lId],
+          lastPreacherId
+        );
+        const pId = chosenPreacher ? chosenPreacher.id : null;
+        if (pId) {
+          preachCount[pId] = (preachCount[pId] || 0) + 1;
+          generalCount[pId] = (generalCount[pId] || 0) + 1;
+          lastPreacherId = pId;
+        }
 
-        const h1 = pickRandomMin(activeMembers, generalCount, usedIds);
-        if (h1) { generalCount[h1.id] = (generalCount[h1.id] || 0) + 1; usedIds.push(h1.id); }
+        const updates: Partial<CellEvent> = {
+          leaderId: lId,
+          preacherId: pId,
+          updatedAt: new Date().toISOString()
+        };
 
-        const h2 = pickRandomMin(activeMembers, generalCount, usedIds);
-        if (h2) { generalCount[h2.id] = (generalCount[h2.id] || 0) + 1; usedIds.push(h2.id); }
+        if (ev.type === 'Cena del Señor') {
+          const usedIds: (string | null)[] = [lId, pId];
 
-        const h3 = pickRandomMin(activeMembers, generalCount, usedIds);
-        if (h3) { generalCount[h3.id] = (generalCount[h3.id] || 0) + 1; usedIds.push(h3.id); }
+          const bMem = pickRandomMin(activeMembers, generalCount, usedIds);
+          if (bMem) { generalCount[bMem.id] = (generalCount[bMem.id] || 0) + 1; usedIds.push(bMem.id); }
 
-        updates.breadPrayerMemberId = bId;
-        updates.winePrayerMemberId = wId;
-        updates.helper1Id = h1 ? h1.id : null;
-        updates.helper2Id = h2 ? h2.id : null;
-        updates.helper3Id = h3 ? h3.id : null;
+          const wMem = pickRandomMin(activeMembers, generalCount, usedIds);
+          if (wMem) { generalCount[wMem.id] = (generalCount[wMem.id] || 0) + 1; usedIds.push(wMem.id); }
+
+          const h1 = pickRandomMin(activeMembers, generalCount, usedIds);
+          if (h1) { generalCount[h1.id] = (generalCount[h1.id] || 0) + 1; usedIds.push(h1.id); }
+
+          const h2 = pickRandomMin(activeMembers, generalCount, usedIds);
+          if (h2) { generalCount[h2.id] = (generalCount[h2.id] || 0) + 1; usedIds.push(h2.id); }
+
+          const h3 = pickRandomMin(activeMembers, generalCount, usedIds);
+          if (h3) { generalCount[h3.id] = (generalCount[h3.id] || 0) + 1; usedIds.push(h3.id); }
+
+          updates.breadPrayerMemberId = bMem ? bMem.id : null;
+          updates.winePrayerMemberId = wMem ? wMem.id : null;
+          updates.helper1Id = h1 ? h1.id : null;
+          updates.helper2Id = h2 ? h2.id : null;
+          updates.helper3Id = h3 ? h3.id : null;
+        }
+
+        await db.events.update(ev.id, updates);
       }
-
-      await db.events.update(ev.id, updates);
-      assignedCount++;
     }
 
     await loadAll();
-    showMsg(`🎲 ¡Asignación aleatoria completada respetando roles de Célula e Iglesia!`);
+    showMsg(`⚡ ¡Mes generado y hermanos asignados para ${isCellMode ? 'la CÉLULA' : 'la IGLESIA'}!`);
   };
 
-  // 4. Modal para editar cualquier culto
+  // 4. Modal para editar culto
   const openEditEvent = (ev: CellEvent) => {
     setSelectedEvent(ev);
     setModalLeaderId(ev.leaderId || '');
@@ -493,7 +516,7 @@ export default function App() {
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
   };
 
-  // 5B. COMPARTIR WHATSAPP: SOLO IGLESIA (AYUNOS, BAUTISMO, ESCUELA Y CENA DEL SEÑOR)
+  // 5B. COMPARTIR WHATSAPP: SOLO IGLESIA (CURSO DE BAUTISMO INTEGRADO AL DOMINGO)
   const handleShareChurchOnly = () => {
     const ym = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
     const churchEvents = events
@@ -504,7 +527,7 @@ export default function App() {
       });
 
     if (churchEvents.length === 0) {
-      showMsg('No hay cultos de iglesia programados en este mes.');
+      showMsg('No hay cultos de iglesia en este mes.');
       return;
     }
 
@@ -515,10 +538,18 @@ export default function App() {
     const blocks = churchEvents.map(ev => {
       const lName = getMemberName(ev.leaderId) || 'Pendiente';
       const pName = getMemberName(ev.preacherId) || 'Pendiente';
+      const isSunday = ev.type === 'Escuela Dominical' || ev.type === 'Cena del Señor';
 
       let b = `📅 *${formatFriendlyDate(ev.date)}*\n`;
       b += `*${ev.title.toUpperCase()}*\n`;
-      b += `🕕 Hora: ${formatFriendlyTime(ev.startTime)}\n`;
+
+      if (isSunday) {
+        b += `📖 9:00 a. m. Curso de Bautismo\n`;
+        b += `🕕 10:00 a. m. Culto General\n`;
+      } else {
+        b += `🕕 Hora: ${formatFriendlyTime(ev.startTime)}\n`;
+      }
+
       b += `📍 Lugar: ${ev.location || settings.churchLocation || 'Templo Central'}\n`;
       b += `👤 Dirige: ${lName}\n`;
       b += `📖 Predica: ${pName}`;
@@ -543,7 +574,7 @@ export default function App() {
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
   };
 
-  // 6. Registro de Miembros con roles diferenciados
+  // 6. Registro de Miembros
   const handleAddMember = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMemberName.trim()) return;
@@ -567,7 +598,7 @@ export default function App() {
     setCanLeadChurch(false);
     setCanPreachChurch(false);
     await loadAll();
-    showMsg('Hermano agregado al directorio con sus roles configurados.');
+    showMsg('Hermano agregado al directorio.');
   };
 
   const handleDeleteMember = async (id: string, name: string) => {
@@ -579,19 +610,74 @@ export default function App() {
   };
 
   const ymCurrent = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
-  const currentMonthEvents = events.filter(e => e.date.startsWith(ymCurrent));
+  
+  const visibleEvents = events.filter(e => {
+    if (!e.date.startsWith(ymCurrent)) return false;
+    return activeScope === 'celula' ? e.type === 'Servicio de célula' : e.type !== 'Servicio de célula';
+  });
+
   const isSelectedCell = selectedEvent?.type === 'Servicio de célula';
 
   return (
     <div style={{ maxWidth: '480px', margin: '0 auto', minHeight: '100vh', background: '#f1f5f9', paddingBottom: '75px', display: 'flex', flexDirection: 'column' }}>
-      {/* Encabezado */}
-      <header style={{ background: '#0f172a', color: '#ffffff', padding: '12px 16px', borderBottom: '3px solid #b45309', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <h1 style={{ margin: 0, fontSize: '1.02rem', fontWeight: 800 }}>{settings.churchName}</h1>
-          <p style={{ margin: 0, fontSize: '0.72rem', color: '#f59e0b', fontWeight: 600 }}>Célula: {settings.cellName} ({settings.territory})</p>
+      
+      {/* 1. ENCABEZADO */}
+      <header style={{ background: '#0f172a', color: '#ffffff', padding: '12px 16px', borderBottom: '3px solid #b45309' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <h1 style={{ margin: 0, fontSize: '1.02rem', fontWeight: 800 }}>
+              {activeScope === 'celula' ? settings.cellName : settings.churchName}
+            </h1>
+            <p style={{ margin: 0, fontSize: '0.72rem', color: '#f59e0b', fontWeight: 600 }}>
+              {activeScope === 'celula' ? `${settings.territory} • ${settings.cellLocation}` : `Templo Central • ${settings.churchLocation}`}
+            </p>
+          </div>
+          <span style={{ fontSize: '0.68rem', background: activeScope === 'celula' ? '#166534' : '#1e40af', padding: '4px 8px', borderRadius: '6px', color: '#fff', fontWeight: 700 }}>
+            {activeScope === 'celula' ? 'CÉLULA' : 'IGLESIA'}
+          </span>
         </div>
-        <span style={{ fontSize: '0.68rem', background: '#1e293b', padding: '4px 8px', borderRadius: '6px', color: '#cbd5e1' }}>Célula & Iglesia</span>
       </header>
+
+      {/* 2. CONMUTADOR DE ÁMBITO (CÉLULA vs IGLESIA) */}
+      <div style={{ display: 'flex', background: '#1e293b', padding: '6px 12px', gap: '8px' }}>
+        <button
+          onClick={() => setActiveScope('celula')}
+          style={{
+            flex: 1,
+            padding: '9px',
+            borderRadius: '8px',
+            border: 'none',
+            background: activeScope === 'celula' ? '#047857' : 'transparent',
+            color: activeScope === 'celula' ? '#ffffff' : '#94a3b8',
+            fontWeight: 800,
+            fontSize: '0.78rem',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease',
+            boxShadow: activeScope === 'celula' ? '0 2px 4px rgba(0,0,0,0.2)' : 'none'
+          }}
+        >
+          🏠 Modo Célula (Miércoles)
+        </button>
+
+        <button
+          onClick={() => setActiveScope('iglesia')}
+          style={{
+            flex: 1,
+            padding: '9px',
+            borderRadius: '8px',
+            border: 'none',
+            background: activeScope === 'iglesia' ? '#1d4ed8' : 'transparent',
+            color: activeScope === 'iglesia' ? '#ffffff' : '#94a3b8',
+            fontWeight: 800,
+            fontSize: '0.78rem',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease',
+            boxShadow: activeScope === 'iglesia' ? '0 2px 4px rgba(0,0,0,0.2)' : 'none'
+          }}
+        >
+          🏛️ Modo Iglesia (Cultos)
+        </button>
+      </div>
 
       {notice && (
         <div style={{ background: '#172554', color: '#fff', padding: '9px 12px', fontSize: '0.8rem', textAlign: 'center', fontWeight: 600 }}>
@@ -599,7 +685,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Contenido Principal */}
+      {/* 3. CONTENIDO PRINCIPAL */}
       <main style={{ padding: '14px', flex: 1 }}>
 
         {/* 1. CALENDARIO */}
@@ -610,78 +696,81 @@ export default function App() {
               <button onClick={() => { if (currentMonth === 0) { setCurrentMonth(11); setCurrentYear(y => y - 1); } else { setCurrentMonth(m => m - 1); } }} style={{ background: '#f1f5f9', border: '1px solid #cbd5e1', padding: '6px 12px', borderRadius: '8px', cursor: 'pointer', fontWeight: 700 }}>◀</button>
               <div style={{ textAlign: 'center' }}>
                 <span style={{ fontSize: '1rem', fontWeight: 800, color: '#0f172a' }}>{MONTH_NAMES[currentMonth]} {currentYear}</span>
-                <span style={{ display: 'block', fontSize: '0.7rem', color: '#64748b' }}>{currentMonthEvents.length} actividad(es) programadas</span>
+                <span style={{ display: 'block', fontSize: '0.7rem', color: '#64748b' }}>
+                  {visibleEvents.length} culto(s) en {activeScope === 'celula' ? 'Célula' : 'Iglesia'}
+                </span>
               </div>
               <button onClick={() => { if (currentMonth === 11) { setCurrentMonth(0); setCurrentYear(y => y + 1); } else { setCurrentMonth(m => m + 1); } }} style={{ background: '#f1f5f9', border: '1px solid #cbd5e1', padding: '6px 12px', borderRadius: '8px', cursor: 'pointer', fontWeight: 700 }}>▶</button>
             </div>
 
-            {/* Generación y Asignación */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '10px' }}>
-              <button onClick={handleGenerateFullChurch} style={{ background: '#0f172a', color: '#fff', border: 'none', padding: '11px', borderRadius: '10px', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer' }}>
-                ⚡ Generar Cultos Mes
-              </button>
-              <button onClick={handleAutoAssign} style={{ background: '#b45309', color: '#fff', border: 'none', padding: '11px', borderRadius: '10px', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer' }}>
-                🎲 Asignar al Azar
-              </button>
-            </div>
+            {/* UN SOLO BOTÓN PRINCIPAL PARA GENERAR Y ASIGNAR */}
+            <button
+              onClick={handleGenerateAndAssign}
+              style={{
+                width: '100%',
+                background: activeScope === 'celula' ? '#065f46' : '#1e3a8a',
+                color: '#fff',
+                border: 'none',
+                padding: '13px',
+                borderRadius: '11px',
+                fontSize: '0.85rem',
+                fontWeight: 800,
+                cursor: 'pointer',
+                marginBottom: '10px',
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                gap: '8px',
+                boxShadow: '0 2px 5px rgba(0,0,0,0.15)'
+              }}
+            >
+              <span>⚡</span>
+              <span>
+                {activeScope === 'celula' ? 'Generar y Asignar Mes (Célula)' : 'Generar y Asignar Mes (Iglesia)'}
+              </span>
+            </button>
 
-            {/* DOS BOTONES SEPARADOS PARA WHATSAPP */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '14px' }}>
-              <button
-                onClick={handleShareCellOnly}
-                style={{
-                  background: '#047857',
-                  color: '#fff',
-                  border: 'none',
-                  padding: '11px',
-                  borderRadius: '10px',
-                  fontSize: '0.8rem',
-                  fontWeight: 800,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                  gap: '6px'
-                }}
-              >
-                <span>🟢</span>
-                <span>Compartir CÉLULA por WhatsApp (Solo Miércoles)</span>
-              </button>
+            {/* Botón contextual de WhatsApp */}
+            <button
+              onClick={activeScope === 'celula' ? handleShareCellOnly : handleShareChurchOnly}
+              style={{
+                width: '100%',
+                background: activeScope === 'celula' ? '#047857' : '#1d4ed8',
+                color: '#fff',
+                border: 'none',
+                padding: '12px',
+                borderRadius: '11px',
+                fontSize: '0.82rem',
+                fontWeight: 800,
+                cursor: 'pointer',
+                marginBottom: '14px',
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                gap: '8px',
+                boxShadow: '0 3px 6px rgba(0,0,0,0.1)'
+              }}
+            >
+              <span>📲</span>
+              <span>
+                {activeScope === 'celula' ? 'Compartir CÉLULA por WhatsApp (Miércoles)' : 'Compartir IGLESIA por WhatsApp (Cultos Generales)'}
+              </span>
+            </button>
 
-              <button
-                onClick={handleShareChurchOnly}
-                style={{
-                  background: '#1d4ed8',
-                  color: '#fff',
-                  border: 'none',
-                  padding: '11px',
-                  borderRadius: '10px',
-                  fontSize: '0.8rem',
-                  fontWeight: 800,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                  gap: '6px'
-                }}
-              >
-                <span>🔵</span>
-                <span>Compartir IGLESIA por WhatsApp (Cultos Generales)</span>
-              </button>
-            </div>
-
-            {/* Lista de cultos */}
+            {/* Lista de cultos filtrada */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {currentMonthEvents.length === 0 ? (
+              {visibleEvents.length === 0 ? (
                 <div style={{ background: '#fff', padding: '24px', borderRadius: '12px', textAlign: 'center', color: '#64748b', fontSize: '0.85rem' }}>
-                  No hay cultos programados para este mes.<br/>Pulsa <strong>"⚡ Generar Cultos Mes"</strong> arriba.
+                  No hay cultos programados en este mes para {activeScope === 'celula' ? 'la Célula' : 'la Iglesia'}.<br/>
+                  Pulsa arriba <strong>"⚡ Generar y Asignar Mes"</strong> para crearlos y sortearlos en 1 segundo.
                 </div>
               ) : (
-                currentMonthEvents.map(ev => {
+                visibleEvents.map(ev => {
                   const leaderName = getMemberName(ev.leaderId);
                   const preacherName = getMemberName(ev.preacherId);
                   const isCell = ev.type === 'Servicio de célula';
                   const isCena = ev.type === 'Cena del Señor';
+                  const isSunday = ev.type === 'Escuela Dominical' || isCena;
 
                   return (
                     <div
@@ -699,7 +788,7 @@ export default function App() {
                         <span style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600 }}>🕕 {formatFriendlyTime(ev.startTime)}</span>
                       </div>
 
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                         <span style={{ fontSize: '0.82rem', fontWeight: 700, color: isCell ? '#047857' : isCena ? '#b45309' : '#1e3a8a' }}>
                           {isCell ? '🏠 ' + ev.title : isCena ? '🍷 ' + ev.title : '⛪ ' + ev.title}
                         </span>
@@ -707,6 +796,13 @@ export default function App() {
                           {ev.location || (isCell ? settings.cellLocation : settings.churchLocation)}
                         </span>
                       </div>
+
+                      {/* Notificación de Curso de Bautismo a las 9 am los domingos */}
+                      {isSunday && (
+                        <div style={{ background: '#f8fafc', padding: '4px 8px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.7rem', color: '#475569', marginBottom: '8px', fontWeight: 600 }}>
+                          📖 9:00 a. m. Curso de Bautismo (previo a la Escuela)
+                        </div>
+                      )}
 
                       {/* Tarjeta de Responsables */}
                       <div style={{ background: '#f8fafc', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: isCena ? '8px' : '10px' }}>
@@ -753,28 +849,32 @@ export default function App() {
         {tab === 'inicio' && (
           <div>
             <div style={{ background: 'linear-gradient(135deg, #0f172a, #172554)', color: '#fff', padding: '18px', borderRadius: '16px', marginBottom: '16px', border: '1px solid #b45309' }}>
-              <span style={{ fontSize: '0.7rem', color: '#f59e0b', textTransform: 'uppercase', fontWeight: 700 }}>Organización General</span>
-              <h2 style={{ margin: '6px 0', fontSize: '1.2rem' }}>{settings.churchName}</h2>
-              <p style={{ margin: 0, fontSize: '0.85rem', color: '#cbd5e1' }}>Célula: {settings.cellName} ({settings.territory})</p>
+              <span style={{ fontSize: '0.7rem', color: '#f59e0b', textTransform: 'uppercase', fontWeight: 700 }}>Ámbito Activo</span>
+              <h2 style={{ margin: '6px 0', fontSize: '1.2rem' }}>
+                {activeScope === 'celula' ? settings.cellName : settings.churchName}
+              </h2>
+              <p style={{ margin: 0, fontSize: '0.85rem', color: '#cbd5e1' }}>
+                {activeScope === 'celula' ? `${settings.territory} • ${settings.cellLocation}` : `Templo Central • ${settings.churchLocation}`}
+              </p>
               <button onClick={() => setTab('calendario')} style={{ marginTop: '14px', background: '#b45309', border: 'none', color: '#fff', padding: '9px 16px', borderRadius: '8px', fontSize: '0.8rem', fontWeight: 700, cursor: 'pointer' }}>
-                📅 Abrir Calendario y Asignaciones
+                📅 Ver Calendario de {activeScope === 'celula' ? 'Célula' : 'Iglesia'}
               </button>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
               <div style={{ background: '#fff', padding: '14px', borderRadius: '12px', border: '1px solid #cbd5e1' }}>
-                <span style={{ fontSize: '0.75rem', color: '#64748b' }}>Hermanos en lista</span>
+                <span style={{ fontSize: '0.75rem', color: '#64748b' }}>Hermanos registrados</span>
                 <p style={{ margin: '4px 0 0', fontSize: '1.5rem', fontWeight: 800, color: '#0f172a' }}>{members.length}</p>
               </div>
               <div style={{ background: '#fff', padding: '14px', borderRadius: '12px', border: '1px solid #cbd5e1' }}>
-                <span style={{ fontSize: '0.75rem', color: '#64748b' }}>Cultos del mes</span>
-                <p style={{ margin: '4px 0 0', fontSize: '1.5rem', fontWeight: 800, color: '#0f172a' }}>{currentMonthEvents.length}</p>
+                <span style={{ fontSize: '0.75rem', color: '#64748b' }}>Cultos este mes</span>
+                <p style={{ margin: '4px 0 0', fontSize: '1.5rem', fontWeight: 800, color: '#0f172a' }}>{visibleEvents.length}</p>
               </div>
             </div>
           </div>
         )}
 
-        {/* 3. MIEMBROS (ROLES SEPARADOS) */}
+        {/* 3. MIEMBROS */}
         {tab === 'miembros' && (
           <div>
             <form onSubmit={handleAddMember} style={{ background: '#fff', padding: '14px', borderRadius: '12px', border: '1px solid #cbd5e1', marginBottom: '14px' }}>
@@ -782,7 +882,6 @@ export default function App() {
               <input type="text" placeholder="Nombre completo *" value={newMemberName} onChange={e => setNewMemberName(e.target.value)} required style={{ width: '100%', padding: '9px', marginBottom: '8px', boxSizing: 'border-box', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
               <input type="text" placeholder="Teléfono (opcional)" value={newMemberPhone} onChange={e => setNewMemberPhone(e.target.value)} style={{ width: '100%', padding: '9px', marginBottom: '10px', boxSizing: 'border-box', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
 
-              {/* Casillas Célula */}
               <div style={{ background: '#f0fdf4', padding: '10px', borderRadius: '8px', marginBottom: '8px', border: '1px solid #bbf7d0' }}>
                 <span style={{ display: 'block', fontSize: '0.72rem', fontWeight: 800, color: '#166534', marginBottom: '6px' }}>🏠 Capacidades en CÉLULA:</span>
                 <div style={{ display: 'flex', gap: '16px', fontSize: '0.78rem' }}>
@@ -791,7 +890,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Casillas Iglesia */}
               <div style={{ background: '#eff6ff', padding: '10px', borderRadius: '8px', marginBottom: '12px', border: '1px solid #bfdbfe' }}>
                 <span style={{ display: 'block', fontSize: '0.72rem', fontWeight: 800, color: '#1e40af', marginBottom: '6px' }}>🏛️ Capacidades en IGLESIA:</span>
                 <div style={{ display: 'flex', gap: '16px', fontSize: '0.78rem' }}>
@@ -803,7 +901,6 @@ export default function App() {
               <button type="submit" style={{ width: '100%', background: '#0f172a', color: '#fff', border: 'none', padding: '10px', borderRadius: '8px', fontWeight: 700, fontSize: '0.8rem', cursor: 'pointer' }}>Guardar Hermano</button>
             </form>
 
-            {/* Directorio de Hermanos con etiquetas claras */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {members.map(m => (
                 <div key={m.id} style={{ background: '#fff', padding: '12px', borderRadius: '10px', border: '1px solid #cbd5e1', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -811,7 +908,6 @@ export default function App() {
                     <div style={{ fontWeight: 800, fontSize: '0.88rem' }}>{m.fullName}</div>
                     {m.phone && <div style={{ fontSize: '0.75rem', color: '#64748b' }}>📞 {m.phone}</div>}
 
-                    {/* Etiquetas Célula */}
                     <div style={{ display: 'flex', gap: '4px', marginTop: '4px', flexWrap: 'wrap' }}>
                       <span style={{ fontSize: '0.62rem', background: '#dcfce7', color: '#166534', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>
                         Célula: {[m.canLeadCell ? 'Dirige' : '', m.canPreachCell ? 'Predica' : ''].filter(Boolean).join(' / ') || 'Sin rol'}
@@ -830,13 +926,12 @@ export default function App() {
           </div>
         )}
 
-        {/* 4. AJUSTES SEPARADOS (CÉLULA E IGLESIA) */}
+        {/* 4. AJUSTES */}
         {tab === 'ajustes' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
             <form onSubmit={handleSaveSettings} style={{ background: '#fff', padding: '16px', borderRadius: '12px', border: '1px solid #cbd5e1' }}>
               <h3 style={{ margin: '0 0 12px', fontSize: '1rem', fontWeight: 800, color: '#0f172a' }}>⚙️ Configuración del Sistema</h3>
 
-              {/* Sección Célula */}
               <div style={{ background: '#f0fdf4', padding: '12px', borderRadius: '8px', border: '1px solid #bbf7d0', marginBottom: '12px' }}>
                 <span style={{ display: 'block', fontSize: '0.8rem', fontWeight: 800, color: '#166534', marginBottom: '8px' }}>🏠 Datos de la CÉLULA:</span>
 
@@ -856,12 +951,11 @@ export default function App() {
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: '#334155', marginBottom: '2px' }}>Hora habitual (Miércoles):</label>
+                  <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: '#334155', marginBottom: '2px' }}>Hora habitual de Célula (Miércoles):</label>
                   <input type="time" value={formCellTime} onChange={e => setFormCellTime(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
                 </div>
               </div>
 
-              {/* Sección Iglesia */}
               <div style={{ background: '#eff6ff', padding: '12px', borderRadius: '8px', border: '1px solid #bfdbfe', marginBottom: '14px' }}>
                 <span style={{ display: 'block', fontSize: '0.8rem', fontWeight: 800, color: '#1e40af', marginBottom: '8px' }}>🏛️ Datos de la IGLESIA:</span>
 
@@ -882,23 +976,84 @@ export default function App() {
             </form>
 
             <div style={{ background: '#fff', padding: '16px', borderRadius: '12px', border: '1px solid #cbd5e1' }}>
-              <h3 style={{ margin: '0 0 8px', fontSize: '0.9rem', fontWeight: 800 }}>📦 Copias de Seguridad</h3>
-              <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0 0 12px' }}>Exporta tus datos periódicamente para no perderlos si cambias de teléfono.</p>
+              <h3 style={{ margin: '0 0 8px', fontSize: '0.9rem', fontWeight: 800 }}>📦 Copias de Seguridad (JSON)</h3>
+              <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0 0 12px' }}>
+                Guarda una copia en Google Drive, WhatsApp o en tu teléfono para no perder ningún dato.
+              </p>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <button type="button" onClick={handleExportBackup} style={{ width: '100%', background: '#f1f5f9', color: '#0f172a', border: '1px solid #cbd5e1', padding: '10px', borderRadius: '8px', fontWeight: 700, fontSize: '0.78rem', cursor: 'pointer' }}>
-                  📥 Descargar Copia de Seguridad (JSON)
+                <button
+                  type="button"
+                  onClick={handleExportBackup}
+                  style={{
+                    width: '100%',
+                    background: '#047857',
+                    color: '#fff',
+                    border: 'none',
+                    padding: '11px',
+                    borderRadius: '8px',
+                    fontWeight: 800,
+                    fontSize: '0.8rem',
+                    cursor: 'pointer'
+                  }}
+                >
+                  📥 Guardar / Compartir Copia JSON
                 </button>
 
                 <label style={{ width: '100%', background: '#f1f5f9', color: '#0f172a', border: '1px solid #cbd5e1', padding: '10px', borderRadius: '8px', fontWeight: 700, fontSize: '0.78rem', cursor: 'pointer', textAlign: 'center', boxSizing: 'border-box', display: 'block' }}>
-                  📤 Restaurar desde Archivo JSON
-                  <input type="file" accept=".json" onChange={handleRestoreBackup} style={{ display: 'none' }} />
+                  📤 Restaurar desde Archivo .json
+                  <input type="file" accept=".json" onChange={handleRestoreFile} style={{ display: 'none' }} />
                 </label>
+
+                <button
+                  type="button"
+                  onClick={() => setShowPasteModal(true)}
+                  style={{
+                    width: '100%',
+                    background: '#f8fafc',
+                    color: '#475569',
+                    border: '1px dashed #cbd5e1',
+                    padding: '9px',
+                    borderRadius: '8px',
+                    fontWeight: 700,
+                    fontSize: '0.75rem',
+                    cursor: 'pointer'
+                  }}
+                >
+                  📋 O Restaurar pegando texto JSON
+                </button>
               </div>
             </div>
           </div>
         )}
       </main>
+
+      {/* Modal para pegar texto JSON */}
+      {showPasteModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 120 }}>
+          <div style={{ background: '#fff', width: '100%', maxWidth: '380px', borderRadius: '16px', padding: '18px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
+            <h3 style={{ margin: '0 0 8px', fontSize: '0.95rem', fontWeight: 800 }}>Pegar Respaldo JSON</h3>
+            <p style={{ margin: '0 0 10px', fontSize: '0.72rem', color: '#64748b' }}>
+              Pega aquí el texto completo de tu copia de seguridad JSON:
+            </p>
+            <textarea
+              rows={8}
+              value={pastedJsonText}
+              onChange={e => setPastedJsonText(e.target.value)}
+              placeholder='{"schemaVersion": 2, ...}'
+              style={{ width: '100%', padding: '8px', fontSize: '0.7rem', fontFamily: 'monospace', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box', marginBottom: '12px' }}
+            />
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button onClick={() => setShowPasteModal(false)} style={{ flex: 1, padding: '10px', background: '#e2e8f0', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: 'pointer' }}>
+                Cancelar
+              </button>
+              <button onClick={handleRestorePastedText} style={{ flex: 1, padding: '10px', background: '#0f172a', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: 'pointer' }}>
+                Restaurar Datos
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal de Asignación / Edición */}
       {selectedEvent && (
