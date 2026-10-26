@@ -1,6 +1,3 @@
-$utf8NoBom = New-Object System.Text.UTF8Encoding $false
-
-$appCode = @'
 import React, { useState, useEffect } from 'react';
 import { db, DEFAULT_SETTINGS } from './db';
 import { Member, CellEvent, AppSettings } from './types';
@@ -13,24 +10,20 @@ export default function App() {
   const [members, setMembers] = useState<Member[]>([]);
   const [events, setEvents] = useState<CellEvent[]>([]);
 
-  // Mes visible
   const today = new Date();
   const [currentYear, setCurrentYear] = useState(today.getFullYear());
   const [currentMonth, setCurrentMonth] = useState(today.getMonth());
 
-  // Formulario de Ajustes
   const [formCellName, setFormCellName] = useState('');
   const [formTerritory, setFormTerritory] = useState('');
   const [formCellLocation, setFormCellLocation] = useState('');
   const [formCellTime, setFormCellTime] = useState('18:00');
-  const [formChurchName, setFormChurchName] = useState('');
+  const [formChurchName, setFormChurchName] = useState('LEHV-La catedral del Avivamiento');
   const [formChurchLocation, setFormChurchLocation] = useState('');
 
-  // Modal para restaurar pegando texto JSON
   const [showPasteModal, setShowPasteModal] = useState(false);
   const [pastedJsonText, setPastedJsonText] = useState('');
 
-  // Modal de edición manual de culto
   const [selectedEvent, setSelectedEvent] = useState<CellEvent | null>(null);
   const [modalLeaderId, setModalLeaderId] = useState<string>('');
   const [modalPreacherId, setModalPreacherId] = useState<string>('');
@@ -43,7 +36,6 @@ export default function App() {
   const [modalTime, setModalTime] = useState<string>('');
   const [modalStatus, setModalStatus] = useState<'Programado' | 'Realizado' | 'Cancelado'>('Programado');
 
-  // Formulario de Miembro
   const [newMemberName, setNewMemberName] = useState('');
   const [newMemberPhone, setNewMemberPhone] = useState('');
   const [canLeadCell, setCanLeadCell] = useState(false);
@@ -58,13 +50,17 @@ export default function App() {
     if (!s) {
       s = DEFAULT_SETTINGS;
       await db.settings.put(DEFAULT_SETTINGS);
+    } else if (!s.churchName || s.churchName === 'Iglesia La verdad de Cristo') {
+      s.churchName = 'LEHV-La catedral del Avivamiento';
+      await db.settings.put(s);
     }
+
     setSettings(s);
     setFormCellName(s.cellName || DEFAULT_SETTINGS.cellName);
     setFormTerritory(s.territory || DEFAULT_SETTINGS.territory);
     setFormCellLocation(s.cellLocation || DEFAULT_SETTINGS.cellLocation);
     setFormCellTime(s.cellTime || DEFAULT_SETTINGS.cellTime);
-    setFormChurchName(s.churchName || DEFAULT_SETTINGS.churchName);
+    setFormChurchName(s.churchName || 'LEHV-La catedral del Avivamiento');
     setFormChurchLocation(s.churchLocation || DEFAULT_SETTINGS.churchLocation);
 
     const m = await db.members.toArray();
@@ -107,7 +103,6 @@ export default function App() {
     return `${dayNames[dt.getDay()]} ${d} de ${MONTH_NAMES[m - 1]}`;
   };
 
-  // 1. Guardar Ajustes
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     const updated: AppSettings = {
@@ -116,7 +111,7 @@ export default function App() {
       territory: formTerritory.trim() || 'Territorio #9',
       cellLocation: formCellLocation.trim() || 'Casa habitual',
       cellTime: formCellTime || '18:00',
-      churchName: formChurchName.trim() || 'Iglesia La verdad de Cristo',
+      churchName: formChurchName.trim() || 'LEHV-La catedral del Avivamiento',
       churchLocation: formChurchLocation.trim() || 'Templo Central',
       updatedAt: new Date().toISOString()
     };
@@ -125,7 +120,6 @@ export default function App() {
     showMsg('¡Ajustes guardados con éxito!');
   };
 
-  // 2. Exportar Copia de Seguridad
   const handleExportBackup = async () => {
     try {
       const data = {
@@ -140,7 +134,7 @@ export default function App() {
       if (navigator.share) {
         try {
           await navigator.share({
-            title: 'Copia_Seguridad_Iglesia.json',
+            title: 'Copia_LEHV_LaCatedralDelAvivamiento.json',
             text: jsonStr
           });
           showMsg('Copia exportada con éxito.');
@@ -155,7 +149,7 @@ export default function App() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `Copia_Seguridad_${new Date().toISOString().substring(0, 10)}.json`;
+        a.download = `Copia_LEHV_${new Date().toISOString().substring(0, 10)}.json`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -172,7 +166,7 @@ export default function App() {
 
   const processRestoreObject = async (parsed: any) => {
     if (!parsed.settings || !Array.isArray(parsed.members) || !Array.isArray(parsed.events)) {
-      showMsg('El archivo no contiene un formato de respaldo válido.');
+      showMsg('El archivo no contiene un respaldo válido.');
       return;
     }
     if (window.confirm('¿Deseas restaurar esta copia? Reemplazará los datos actuales.')) {
@@ -215,13 +209,11 @@ export default function App() {
     }
   };
 
-  // 3. GENERAR Y ASIGNAR MES (CORREGIDO: CURSO DE BAUTISMO INTEGRADO AL DOMINGO, SIN DIRIGENTE NI PREDICADOR SEPARADOS)
   const handleGenerateAndAssign = async () => {
     const isCellMode = activeScope === 'celula';
     const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
     const nowIso = new Date().toISOString();
 
-    // Eliminar posibles eventos huérfanos previos de "Curso de bautismo" como evento separado
     if (!isCellMode) {
       const oldBautismos = await db.events.where('type').equals('Curso de bautismo').toArray();
       for (const b of oldBautismos) {
@@ -229,7 +221,6 @@ export default function App() {
       }
     }
 
-    // PASO A: Crear los cultos del mes
     for (let day = 1; day <= daysInMonth; day++) {
       const dt = new Date(currentYear, currentMonth, day, 12, 0, 0);
       const dayOfWeek = dt.getDay();
@@ -238,7 +229,6 @@ export default function App() {
       const date = `${currentYear}-${monthStr}-${dayStr}`;
 
       if (isCellMode) {
-        // Solo Miércoles de Célula
         if (dayOfWeek === 3) {
           const key = `servicio_miercoles_${date}`;
           const exists = await db.events.where('generationKey').equals(key).first();
@@ -261,7 +251,6 @@ export default function App() {
           }
         }
       } else {
-        // Cultos de Iglesia: Ayunos (Mar/Vie)
         if (dayOfWeek === 2 || dayOfWeek === 5) {
           const key = `ayuno_${date}`;
           const exists = await db.events.where('generationKey').equals(key).first();
@@ -284,7 +273,6 @@ export default function App() {
           }
         }
 
-        // Domingos: UN SOLO CULTO con dirigentes (9:00 am Curso Bautismo, 10:00 am Culto)
         if (dayOfWeek === 0) {
           const isLastSunday = (day + 7) > daysInMonth;
           const keyDominical = isLastSunday ? `cena_senor_${date}` : `escuela_dominical_${date}`;
@@ -316,7 +304,6 @@ export default function App() {
       }
     }
 
-    // PASO B: Asignación equitativa y aleatoria de los cultos reales
     const allCurrentEvents = await db.events.orderBy('date').toArray();
     const ym = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
     const targetEvents = allCurrentEvents.filter(e =>
@@ -437,7 +424,6 @@ export default function App() {
     showMsg(`⚡ ¡Mes generado y hermanos asignados para ${isCellMode ? 'la CÉLULA' : 'la IGLESIA'}!`);
   };
 
-  // 4. Modal para editar culto
   const openEditEvent = (ev: CellEvent) => {
     setSelectedEvent(ev);
     setModalLeaderId(ev.leaderId || '');
@@ -484,7 +470,6 @@ export default function App() {
     }
   };
 
-  // 5A. COMPARTIR WHATSAPP: SOLO CÉLULA (MIÉRCOLES)
   const handleShareCellOnly = () => {
     const ym = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
     const cellEvents = events
@@ -516,7 +501,6 @@ export default function App() {
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
   };
 
-  // 5B. COMPARTIR WHATSAPP: SOLO IGLESIA (CURSO DE BAUTISMO INTEGRADO AL DOMINGO)
   const handleShareChurchOnly = () => {
     const ym = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
     const churchEvents = events
@@ -574,7 +558,6 @@ export default function App() {
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
   };
 
-  // 6. Registro de Miembros
   const handleAddMember = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMemberName.trim()) return;
@@ -610,7 +593,6 @@ export default function App() {
   };
 
   const ymCurrent = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
-  
   const visibleEvents = events.filter(e => {
     if (!e.date.startsWith(ymCurrent)) return false;
     return activeScope === 'celula' ? e.type === 'Servicio de célula' : e.type !== 'Servicio de célula';
@@ -691,7 +673,6 @@ export default function App() {
         {/* 1. CALENDARIO */}
         {tab === 'calendario' && (
           <div>
-            {/* Navegación del mes */}
             <div style={{ background: '#ffffff', padding: '10px 14px', borderRadius: '12px', border: '1px solid #cbd5e1', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
               <button onClick={() => { if (currentMonth === 0) { setCurrentMonth(11); setCurrentYear(y => y - 1); } else { setCurrentMonth(m => m - 1); } }} style={{ background: '#f1f5f9', border: '1px solid #cbd5e1', padding: '6px 12px', borderRadius: '8px', cursor: 'pointer', fontWeight: 700 }}>◀</button>
               <div style={{ textAlign: 'center' }}>
@@ -703,7 +684,7 @@ export default function App() {
               <button onClick={() => { if (currentMonth === 11) { setCurrentMonth(0); setCurrentYear(y => y + 1); } else { setCurrentMonth(m => m + 1); } }} style={{ background: '#f1f5f9', border: '1px solid #cbd5e1', padding: '6px 12px', borderRadius: '8px', cursor: 'pointer', fontWeight: 700 }}>▶</button>
             </div>
 
-            {/* UN SOLO BOTÓN PRINCIPAL PARA GENERAR Y ASIGNAR */}
+            {/* UN SOLO BOTÓN PRINCIPAL */}
             <button
               onClick={handleGenerateAndAssign}
               style={{
@@ -730,7 +711,7 @@ export default function App() {
               </span>
             </button>
 
-            {/* Botón contextual de WhatsApp */}
+            {/* Botón WhatsApp */}
             <button
               onClick={activeScope === 'celula' ? handleShareCellOnly : handleShareChurchOnly}
               style={{
@@ -757,7 +738,7 @@ export default function App() {
               </span>
             </button>
 
-            {/* Lista de cultos filtrada */}
+            {/* Lista de cultos */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {visibleEvents.length === 0 ? (
                 <div style={{ background: '#fff', padding: '24px', borderRadius: '12px', textAlign: 'center', color: '#64748b', fontSize: '0.85rem' }}>
@@ -797,14 +778,12 @@ export default function App() {
                         </span>
                       </div>
 
-                      {/* Notificación de Curso de Bautismo a las 9 am los domingos */}
                       {isSunday && (
                         <div style={{ background: '#f8fafc', padding: '4px 8px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.7rem', color: '#475569', marginBottom: '8px', fontWeight: 600 }}>
                           📖 9:00 a. m. Curso de Bautismo (previo a la Escuela)
                         </div>
                       )}
 
-                      {/* Tarjeta de Responsables */}
                       <div style={{ background: '#f8fafc', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: isCena ? '8px' : '10px' }}>
                         <div>
                           <span style={{ display: 'block', fontSize: '0.65rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 700 }}>Dirige:</span>
@@ -820,7 +799,6 @@ export default function App() {
                         </div>
                       </div>
 
-                      {/* Santa Cena */}
                       {isCena && (
                         <div style={{ background: '#fef3c7', padding: '10px', borderRadius: '8px', border: '1px solid #fde68a', marginBottom: '10px', fontSize: '0.75rem' }}>
                           <div style={{ fontWeight: 800, color: '#92400e', marginBottom: '6px' }}>🍞🍷 Encargados de la Cena del Señor:</div>

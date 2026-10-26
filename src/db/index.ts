@@ -24,7 +24,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   territory: 'Territorio #9',
   cellLocation: 'Casa de paz habitual',
   cellTime: '18:00',
-  churchName: 'Iglesia La verdad de Cristo',
+  churchName: 'LEHV-La catedral del Avivamiento',
   churchLocation: 'Templo Central, Calle Principal',
   updatedAt: new Date().toISOString()
 };
