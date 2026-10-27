@@ -25,7 +25,9 @@ export default function App() {
   const [formCellDay, setFormCellDay] = useState(3);
   const [formCellTime, setFormCellTime] = useState('18:00');
 
-  // Respaldos
+  // Modales de Respaldo
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportJsonText, setExportJsonText] = useState('');
   const [showPasteModal, setShowPasteModal] = useState(false);
   const [pastedJsonText, setPastedJsonText] = useState('');
 
@@ -42,7 +44,7 @@ export default function App() {
   const [modalTime, setModalTime] = useState<string>('');
   const [modalStatus, setModalStatus] = useState<'Programado' | 'Realizado' | 'Cancelado'>('Programado');
 
-  // Formulario de Miembro (contextual al modo activo)
+  // Formulario de Miembro
   const [newMemberName, setNewMemberName] = useState('');
   const [newMemberPhone, setNewMemberPhone] = useState('');
   const [canLeadRole, setCanLeadRole] = useState(false);
@@ -82,15 +84,19 @@ export default function App() {
     setTimeout(() => setNotice(null), 3500);
   };
 
+  const isChurch = settings.entityType === 'iglesia';
+
+  // ORDENACIÓN ALFABÉTICA ESTRICTA (A - Z) EN ESPAÑOL
+  const sortedMembers = [...members].sort((a, b) =>
+    a.fullName.localeCompare(b.fullName, 'es', { sensitivity: 'base' })
+  );
+
   const getMemberName = (id: string | null | undefined) => {
     if (!id) return null;
     const m = members.find(x => x.id === id);
     return m ? m.fullName : null;
   };
 
-  const isChurch = settings.entityType === 'iglesia';
-
-  // Evaluar capacidades según el modo configurado
   const memberCanLead = (m: Member) => {
     return isChurch ? (m.canLeadChurch ?? m.canLead ?? false) : (m.canLeadCell ?? m.canLead ?? false);
   };
@@ -136,54 +142,79 @@ export default function App() {
     showMsg(`¡Configuración de ${formEntityType === 'iglesia' ? 'la Iglesia' : 'la Célula'} guardada!`);
   };
 
-  // Respaldos
-  const handleExportBackup = async () => {
+  // EXPORTAR COPIA DE SEGURIDAD BLINDADA (MODAL CON COPIAR, COMPARTIR Y DESCARGAR)
+  const openExportBackupModal = () => {
+    const data = {
+      schemaVersion: 3,
+      exportedAt: new Date().toISOString(),
+      settings,
+      members,
+      events
+    };
+    const jsonStr = JSON.stringify(data, null, 2);
+    setExportJsonText(jsonStr);
+    setShowExportModal(true);
+  };
+
+  const copyExportToClipboard = async () => {
     try {
-      const data = {
-        schemaVersion: 3,
-        exportedAt: new Date().toISOString(),
-        settings,
-        members,
-        events
-      };
-      const jsonStr = JSON.stringify(data, null, 2);
-
-      if (navigator.share) {
-        try {
-          await navigator.share({
-            title: `Copia_${isChurch ? 'Iglesia' : 'Celula'}.json`,
-            text: jsonStr
-          });
-          showMsg('Copia exportada con éxito.');
-          return;
-        } catch (e: any) {
-          if (e.name === 'AbortError') return;
-        }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(exportJsonText);
+        showMsg('¡Copia copiada al portapapeles con éxito!');
+        return;
       }
+    } catch {}
 
+    // Respaldo clásico para copiar texto en cualquier teléfono
+    const textArea = document.createElement('textarea');
+    textArea.value = exportJsonText;
+    textArea.style.position = 'fixed';
+    textArea.style.left = '-999999px';
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    document.execCommand('copy');
+    document.body.removeChild(textArea);
+    showMsg('¡Copia copiada al portapapeles!');
+  };
+
+  const shareNativeExport = async () => {
+    if (navigator.share) {
       try {
-        const blob = new Blob([jsonStr], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `Copia_${new Date().toISOString().substring(0, 10)}.json`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        showMsg('Archivo descargado.');
-      } catch {
-        await navigator.clipboard.writeText(jsonStr);
-        showMsg('Copia JSON copiada al portapapeles.');
+        await navigator.share({
+          title: `Copia_${isChurch ? 'Iglesia' : 'Celula'}.json`,
+          text: exportJsonText
+        });
+        showMsg('Copia compartida con éxito.');
+      } catch (e: any) {
+        if (e.name !== 'AbortError') copyExportToClipboard();
       }
-    } catch {
-      showMsg('Error al exportar.');
+    } else {
+      copyExportToClipboard();
     }
   };
 
+  const downloadExportFile = () => {
+    try {
+      const blob = new Blob([exportJsonText], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Copia_Seguridad_${new Date().toISOString().substring(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showMsg('Archivo descargado.');
+    } catch {
+      copyExportToClipboard();
+    }
+  };
+
+  // Restaurar copia
   const processRestoreObject = async (parsed: any) => {
     if (!parsed.settings || !Array.isArray(parsed.members) || !Array.isArray(parsed.events)) {
-      showMsg('El archivo no contiene un formato válido.');
+      showMsg('El archivo no contiene un formato de respaldo válido.');
       return;
     }
     if (window.confirm('¿Deseas restaurar esta copia? Reemplazará los datos actuales.')) {
@@ -529,7 +560,6 @@ export default function App() {
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
   };
 
-  // 6. REGISTRO DE MIEMBRO ESTRICTAMENTE CONTEXTUAL
   const handleAddMember = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMemberName.trim()) return;
@@ -539,10 +569,8 @@ export default function App() {
       id: 'm_' + Date.now(),
       fullName: newMemberName.trim(),
       phone: newMemberPhone.trim() || undefined,
-      // Si estamos en Célula: solo guardamos capacidades de Célula
       canLeadCell: !isChurch ? canLeadRole : false,
       canPreachCell: !isChurch ? canPreachRole : false,
-      // Si estamos en Iglesia: solo guardamos capacidades de Iglesia
       canLeadChurch: isChurch ? canLeadRole : false,
       canPreachChurch: isChurch ? canPreachRole : false,
       isActive: true,
@@ -778,7 +806,7 @@ export default function App() {
           </div>
         )}
 
-        {/* 3. MIEMBROS (ESTRICTAMENTE CONTEXTUAL) */}
+        {/* 3. MIEMBROS (ORDEN ALFABÉTICO ESTRICTO A-Z) */}
         {tab === 'miembros' && (
           <div>
             <form onSubmit={handleAddMember} style={{ background: '#fff', padding: '14px', borderRadius: '12px', border: '1px solid #cbd5e1', marginBottom: '14px' }}>
@@ -788,7 +816,6 @@ export default function App() {
               <input type="text" placeholder="Nombre completo *" value={newMemberName} onChange={e => setNewMemberName(e.target.value)} required style={{ width: '100%', padding: '9px', marginBottom: '8px', boxSizing: 'border-box', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
               <input type="text" placeholder="Teléfono (opcional)" value={newMemberPhone} onChange={e => setNewMemberPhone(e.target.value)} style={{ width: '100%', padding: '9px', marginBottom: '10px', boxSizing: 'border-box', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
 
-              {/* SI ES IGLESIA: SOLO CAPACIDADES DE IGLESIA */}
               {isChurch ? (
                 <div style={{ background: '#eff6ff', padding: '10px', borderRadius: '8px', marginBottom: '12px', border: '1px solid #bfdbfe' }}>
                   <span style={{ display: 'block', fontSize: '0.74rem', fontWeight: 800, color: '#1e40af', marginBottom: '6px' }}>
@@ -800,7 +827,6 @@ export default function App() {
                   </div>
                 </div>
               ) : (
-                /* SI ES CÉLULA: SOLO CAPACIDADES DE CÉLULA */
                 <div style={{ background: '#f0fdf4', padding: '10px', borderRadius: '8px', marginBottom: '12px', border: '1px solid #bbf7d0' }}>
                   <span style={{ display: 'block', fontSize: '0.74rem', fontWeight: 800, color: '#166534', marginBottom: '6px' }}>
                     🏠 Capacidades en la CÉLULA:
@@ -815,9 +841,14 @@ export default function App() {
               <button type="submit" style={{ width: '100%', background: '#0f172a', color: '#fff', border: 'none', padding: '10px', borderRadius: '8px', fontWeight: 700, fontSize: '0.8rem', cursor: 'pointer' }}>Guardar Hermano</button>
             </form>
 
-            {/* Listado de Miembros contextual */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', padding: '0 4px' }}>
+              <span style={{ fontSize: '0.75rem', fontWeight: 800, color: '#475569' }}>Directorio Alfabético (A - Z):</span>
+              <span style={{ fontSize: '0.7rem', color: '#64748b' }}>{sortedMembers.length} hermanos</span>
+            </div>
+
+            {/* Listado ordenado de la A a la Z */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {members.map(m => {
+              {sortedMembers.map(m => {
                 const canL = memberCanLead(m);
                 const canP = memberCanPreach(m);
 
@@ -827,7 +858,6 @@ export default function App() {
                       <div style={{ fontWeight: 800, fontSize: '0.88rem' }}>{m.fullName}</div>
                       {m.phone && <div style={{ fontSize: '0.75rem', color: '#64748b' }}>📞 {m.phone}</div>}
 
-                      {/* Solo etiquetas pertinentes */}
                       <div style={{ display: 'flex', gap: '4px', marginTop: '4px' }}>
                         {canL && (
                           <span style={{ background: isChurch ? '#dbeafe' : '#dcfce7', color: isChurch ? '#1e40af' : '#166534', fontSize: '0.65rem', padding: '2px 8px', borderRadius: '4px', fontWeight: 700 }}>
@@ -862,7 +892,6 @@ export default function App() {
             <form onSubmit={handleSaveSettings} style={{ background: '#fff', padding: '16px', borderRadius: '12px', border: '1px solid #cbd5e1' }}>
               <h3 style={{ margin: '0 0 12px', fontSize: '1rem', fontWeight: 800, color: '#0f172a' }}>⚙️ Configuración del Sistema</h3>
 
-              {/* Selector de Entidad */}
               <div style={{ background: '#f1f5f9', padding: '12px', borderRadius: '10px', border: '1px solid #cbd5e1', marginBottom: '14px' }}>
                 <span style={{ display: 'block', fontSize: '0.78rem', fontWeight: 800, color: '#0f172a', marginBottom: '8px' }}>
                   ¿Qué deseas administrar en esta app?
@@ -952,17 +981,20 @@ export default function App() {
               </button>
             </form>
 
+            {/* SECCIÓN RESPALDOS (SOLUCIÓN BLINDADA PARA ANDROID) */}
             <div style={{ background: '#fff', padding: '16px', borderRadius: '12px', border: '1px solid #cbd5e1' }}>
               <h3 style={{ margin: '0 0 8px', fontSize: '0.9rem', fontWeight: 800 }}>📦 Copias de Seguridad (JSON)</h3>
-              <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0 0 12px' }}>Guarda tu respaldo en Google Drive, WhatsApp o en tu teléfono.</p>
+              <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0 0 12px' }}>
+                Guarda tu respaldo en Google Drive, WhatsApp o cópialo a tus notas para no perder nada.
+              </p>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 <button
                   type="button"
-                  onClick={handleExportBackup}
-                  style={{ width: '100%', background: '#047857', color: '#fff', border: 'none', padding: '11px', borderRadius: '8px', fontWeight: 800, fontSize: '0.8rem', cursor: 'pointer' }}
+                  onClick={openExportBackupModal}
+                  style={{ width: '100%', background: '#047857', color: '#fff', border: 'none', padding: '11px', borderRadius: '8px', fontWeight: 800, fontSize: '0.82rem', cursor: 'pointer' }}
                 >
-                  📥 Guardar / Compartir Copia JSON
+                  📥 Exportar Copia de Seguridad
                 </button>
 
                 <label style={{ width: '100%', background: '#f1f5f9', color: '#0f172a', border: '1px solid #cbd5e1', padding: '10px', borderRadius: '8px', fontWeight: 700, fontSize: '0.78rem', cursor: 'pointer', textAlign: 'center', boxSizing: 'border-box', display: 'block' }}>
@@ -983,7 +1015,57 @@ export default function App() {
         )}
       </main>
 
-      {/* Modal para pegar texto JSON */}
+      {/* MODAL PARA EXPORTAR COPIA (3 OPCIONES INFALIBLES) */}
+      {showExportModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 130 }}>
+          <div style={{ background: '#fff', width: '100%', maxWidth: '400px', borderRadius: '16px', padding: '18px', boxShadow: '0 10px 25px rgba(0,0,0,0.25)' }}>
+            <h3 style={{ margin: '0 0 6px', fontSize: '1rem', fontWeight: 800, color: '#0f172a' }}>📥 Guardar Copia de Seguridad</h3>
+            <p style={{ margin: '0 0 12px', fontSize: '0.73rem', color: '#64748b' }}>
+              Elige cómo deseas guardar tu respaldo de {isChurch ? 'la Iglesia' : 'la Célula'}:
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '14px' }}>
+              <button
+                onClick={copyExportToClipboard}
+                style={{ width: '100%', background: '#047857', color: '#fff', border: 'none', padding: '11px', borderRadius: '8px', fontWeight: 800, fontSize: '0.8rem', cursor: 'pointer' }}
+              >
+                📋 Copiar Copia al Portapapeles
+              </button>
+
+              <button
+                onClick={shareNativeExport}
+                style={{ width: '100%', background: '#1e3a8a', color: '#fff', border: 'none', padding: '11px', borderRadius: '8px', fontWeight: 800, fontSize: '0.8rem', cursor: 'pointer' }}
+              >
+                📲 Compartir en Android (Drive, WhatsApp, etc.)
+              </button>
+
+              <button
+                onClick={downloadExportFile}
+                style={{ width: '100%', background: '#f1f5f9', color: '#0f172a', border: '1px solid #cbd5e1', padding: '9px', borderRadius: '8px', fontWeight: 700, fontSize: '0.78rem', cursor: 'pointer' }}
+              >
+                💾 Descargar como Archivo .json
+              </button>
+            </div>
+
+            <span style={{ display: 'block', fontSize: '0.68rem', fontWeight: 700, color: '#64748b', marginBottom: '4px' }}>Texto JSON generado:</span>
+            <textarea
+              readOnly
+              rows={4}
+              value={exportJsonText}
+              style={{ width: '100%', padding: '6px', fontSize: '0.65rem', fontFamily: 'monospace', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', marginBottom: '12px', background: '#f8fafc' }}
+            />
+
+            <button
+              onClick={() => setShowExportModal(false)}
+              style={{ width: '100%', padding: '10px', background: '#e2e8f0', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: 'pointer', fontSize: '0.78rem' }}
+            >
+              Cerrar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Modal para restaurar pegando texto JSON */}
       {showPasteModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 120 }}>
           <div style={{ background: '#fff', width: '100%', maxWidth: '380px', borderRadius: '16px', padding: '18px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
@@ -1008,7 +1090,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Modal de Asignación / Edición */}
+      {/* Modal de Asignación / Edición (Selectores en orden A-Z) */}
       {selectedEvent && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 100 }}>
           <div style={{ background: '#fff', width: '100%', maxWidth: '420px', maxHeight: '90vh', overflowY: 'auto', borderRadius: '16px', padding: '18px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
@@ -1020,7 +1102,7 @@ export default function App() {
                 <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, marginBottom: '4px' }}>👤 Quién Dirige:</label>
                 <select value={modalLeaderId} onChange={e => setModalLeaderId(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
                   <option value="">(Pendiente)</option>
-                  {members.map(m => (
+                  {sortedMembers.map(m => (
                     <option key={m.id} value={m.id}>{m.fullName} {memberCanLead(m) ? '✓' : ''}</option>
                   ))}
                 </select>
@@ -1030,7 +1112,7 @@ export default function App() {
                 <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, marginBottom: '4px' }}>📖 Quién Predica:</label>
                 <select value={modalPreacherId} onChange={e => setModalPreacherId(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
                   <option value="">(Pendiente)</option>
-                  {members.map(m => (
+                  {sortedMembers.map(m => (
                     <option key={m.id} value={m.id}>{m.fullName} {memberCanPreach(m) ? '✓' : ''}</option>
                   ))}
                 </select>
@@ -1044,7 +1126,7 @@ export default function App() {
                     <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, marginBottom: '4px' }}>🍞 Ora por el Pan:</label>
                     <select value={modalBreadId} onChange={e => setModalBreadId(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
                       <option value="">(Pendiente)</option>
-                      {members.map(m => <option key={m.id} value={m.id}>{m.fullName}</option>)}
+                      {sortedMembers.map(m => <option key={m.id} value={m.id}>{m.fullName}</option>)}
                     </select>
                   </div>
 
@@ -1052,7 +1134,7 @@ export default function App() {
                     <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, marginBottom: '4px' }}>🍷 Ora por el Vino:</label>
                     <select value={modalWineId} onChange={e => setModalWineId(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
                       <option value="">(Pendiente)</option>
-                      {members.map(m => <option key={m.id} value={m.id}>{m.fullName}</option>)}
+                      {sortedMembers.map(m => <option key={m.id} value={m.id}>{m.fullName}</option>)}
                     </select>
                   </div>
 
@@ -1060,7 +1142,7 @@ export default function App() {
                     <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, marginBottom: '4px' }}>🤝 Colaborador 1:</label>
                     <select value={modalHelper1Id} onChange={e => setModalHelper1Id(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
                       <option value="">(Pendiente)</option>
-                      {members.map(m => <option key={m.id} value={m.id}>{m.fullName}</option>)}
+                      {sortedMembers.map(m => <option key={m.id} value={m.id}>{m.fullName}</option>)}
                     </select>
                   </div>
 
@@ -1068,7 +1150,7 @@ export default function App() {
                     <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, marginBottom: '4px' }}>🤝 Colaborador 2:</label>
                     <select value={modalHelper2Id} onChange={e => setModalHelper2Id(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
                       <option value="">(Pendiente)</option>
-                      {members.map(m => <option key={m.id} value={m.id}>{m.fullName}</option>)}
+                      {sortedMembers.map(m => <option key={m.id} value={m.id}>{m.fullName}</option>)}
                     </select>
                   </div>
 
@@ -1076,7 +1158,7 @@ export default function App() {
                     <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, marginBottom: '4px' }}>🤝 Colaborador 3:</label>
                     <select value={modalHelper3Id} onChange={e => setModalHelper3Id(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
                       <option value="">(Pendiente)</option>
-                      {members.map(m => <option key={m.id} value={m.id}>{m.fullName}</option>)}
+                      {sortedMembers.map(m => <option key={m.id} value={m.id}>{m.fullName}</option>)}
                     </select>
                   </div>
                 </div>
@@ -1118,7 +1200,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Barra de Navegación Inferior */}
+      {/* Navegación Inferior */}
       <nav style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: '#ffffff', borderTop: '1px solid #cbd5e1', display: 'flex', justifyContent: 'space-around', padding: '8px 0', maxWidth: '480px', margin: '0 auto', zIndex: 50 }}>
         {[
           { id: 'calendario', label: 'Calendario', icon: '📅' },
