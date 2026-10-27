@@ -25,11 +25,13 @@ export default function App() {
   const [formCellDay, setFormCellDay] = useState(3);
   const [formCellTime, setFormCellTime] = useState('18:00');
 
-  // Modales de Respaldo
+  // Modales de Respaldo e Importación MySQL
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportJsonText, setExportJsonText] = useState('');
   const [showPasteModal, setShowPasteModal] = useState(false);
   const [pastedJsonText, setPastedJsonText] = useState('');
+  const [showImportMembersModal, setShowImportMembersModal] = useState(false);
+  const [importMembersText, setImportMembersText] = useState('');
 
   // Edición de culto
   const [selectedEvent, setSelectedEvent] = useState<CellEvent | null>(null);
@@ -86,7 +88,7 @@ export default function App() {
 
   const isChurch = settings.entityType === 'iglesia';
 
-  // ORDENACIÓN ALFABÉTICA ESTRICTA (A - Z) EN ESPAÑOL
+  // Orden alfabético estricto A - Z
   const sortedMembers = [...members].sort((a, b) =>
     a.fullName.localeCompare(b.fullName, 'es', { sensitivity: 'base' })
   );
@@ -142,7 +144,90 @@ export default function App() {
     showMsg(`¡Configuración de ${formEntityType === 'iglesia' ? 'la Iglesia' : 'la Célula'} guardada!`);
   };
 
-  // EXPORTAR COPIA DE SEGURIDAD BLINDADA (MODAL CON COPIAR, COMPARTIR Y DESCARGAR)
+  // IMPORTADOR INTELIGENTE DE MIEMBROS DESDE MYSQL (JSON O TEXTO)
+  const processImportMembersList = async (items: any[]) => {
+    if (!Array.isArray(items) || items.length === 0) {
+      showMsg('No se encontraron registros de miembros válidos.');
+      return;
+    }
+
+    const nowIso = new Date().toISOString();
+    const existingNames = new Set(members.map(m => m.fullName.trim().toLowerCase()));
+    const toInsert: Member[] = [];
+    let skippedCount = 0;
+
+    for (const raw of items) {
+      // Buscar el nombre en cualquiera de sus variantes habituales
+      const name = (raw.fullName || raw.nombre || raw.nombres || raw.name || raw.nombre_completo || '').toString().trim();
+      if (!name) continue;
+
+      if (existingNames.has(name.toLowerCase())) {
+        skippedCount++;
+        continue;
+      }
+
+      const phone = (raw.phone || raw.telefono || raw.celular || raw.tel || '').toString().trim() || undefined;
+
+      const isTruthy = (val: any) => val === true || val === 1 || val === '1' || val === 'true' || val === 'si' || val === 's';
+
+      const canLeadC = isTruthy(raw.canLeadCell || raw.dirige_celula || raw.dirige);
+      const canPreachC = isTruthy(raw.canPreachCell || raw.predica_celula || raw.predica);
+      const canLeadCh = isTruthy(raw.canLeadChurch || raw.dirige_iglesia || raw.dirige);
+      const canPreachCh = isTruthy(raw.canPreachChurch || raw.predica_iglesia || raw.predica);
+
+      toInsert.push({
+        id: 'm_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+        fullName: name,
+        phone,
+        canLeadCell: canLeadC,
+        canPreachCell: canPreachC,
+        canLeadChurch: canLeadCh,
+        canPreachChurch: canPreachCh,
+        isActive: true,
+        createdAt: nowIso,
+        updatedAt: nowIso
+      });
+      existingNames.add(name.toLowerCase());
+    }
+
+    if (toInsert.length > 0) {
+      await db.members.bulkAdd(toInsert);
+      await loadAll();
+      showMsg(`¡${toInsert.length} hermanos importados con éxito! ${skippedCount > 0 ? `(${skippedCount} ya existían)` : ''}`);
+      setShowImportMembersModal(false);
+      setImportMembersText('');
+    } else {
+      showMsg('Todos los hermanos de la lista ya estaban registrados.');
+    }
+  };
+
+  const handleImportMembersSubmit = () => {
+    try {
+      const parsed = JSON.parse(importMembersText);
+      const list = Array.isArray(parsed) ? parsed : (parsed.members || parsed.data || []);
+      processImportMembersList(list);
+    } catch {
+      showMsg('El texto ingresado no es un JSON válido. Revisa el formato.');
+    }
+  };
+
+  const handleImportMembersFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const parsed = JSON.parse(reader.result as string);
+        const list = Array.isArray(parsed) ? parsed : (parsed.members || parsed.data || []);
+        await processImportMembersList(list);
+      } catch {
+        showMsg('Error al leer el archivo JSON.');
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  // Respaldos Generales
   const openExportBackupModal = () => {
     const data = {
       schemaVersion: 3,
@@ -165,7 +250,6 @@ export default function App() {
       }
     } catch {}
 
-    // Respaldo clásico para copiar texto en cualquier teléfono
     const textArea = document.createElement('textarea');
     textArea.value = exportJsonText;
     textArea.style.position = 'fixed';
@@ -211,7 +295,6 @@ export default function App() {
     }
   };
 
-  // Restaurar copia
   const processRestoreObject = async (parsed: any) => {
     if (!parsed.settings || !Array.isArray(parsed.members) || !Array.isArray(parsed.events)) {
       showMsg('El archivo no contiene un formato de respaldo válido.');
@@ -806,12 +889,37 @@ export default function App() {
           </div>
         )}
 
-        {/* 3. MIEMBROS (ORDEN ALFABÉTICO ESTRICTO A-Z) */}
+        {/* 3. MIEMBROS (CON BOTÓN PARA IMPORTAR DESDE MYSQL) */}
         {tab === 'miembros' && (
           <div>
+            {/* Botón destacado para importar desde MySQL */}
+            <button
+              onClick={() => setShowImportMembersModal(true)}
+              style={{
+                width: '100%',
+                background: '#1e3a8a',
+                color: '#fff',
+                border: 'none',
+                padding: '11px',
+                borderRadius: '10px',
+                fontWeight: 800,
+                fontSize: '0.82rem',
+                cursor: 'pointer',
+                marginBottom: '12px',
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                gap: '8px',
+                boxShadow: '0 2px 4px rgba(30, 58, 138, 0.2)'
+              }}
+            >
+              <span>👥</span>
+              <span>Importar Hermanos desde MySQL / JSON</span>
+            </button>
+
             <form onSubmit={handleAddMember} style={{ background: '#fff', padding: '14px', borderRadius: '12px', border: '1px solid #cbd5e1', marginBottom: '14px' }}>
               <h3 style={{ margin: '0 0 10px', fontSize: '0.9rem', fontWeight: 800 }}>
-                + Registrar Hermano ({isChurch ? 'Iglesia' : 'Célula'})
+                + Registrar Hermano Individual ({isChurch ? 'Iglesia' : 'Célula'})
               </h3>
               <input type="text" placeholder="Nombre completo *" value={newMemberName} onChange={e => setNewMemberName(e.target.value)} required style={{ width: '100%', padding: '9px', marginBottom: '8px', boxSizing: 'border-box', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
               <input type="text" placeholder="Teléfono (opcional)" value={newMemberPhone} onChange={e => setNewMemberPhone(e.target.value)} style={{ width: '100%', padding: '9px', marginBottom: '10px', boxSizing: 'border-box', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
@@ -846,7 +954,6 @@ export default function App() {
               <span style={{ fontSize: '0.7rem', color: '#64748b' }}>{sortedMembers.length} hermanos</span>
             </div>
 
-            {/* Listado ordenado de la A a la Z */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {sortedMembers.map(m => {
                 const canL = memberCanLead(m);
@@ -886,7 +993,7 @@ export default function App() {
           </div>
         )}
 
-        {/* 4. AJUSTES CONFIGURABLES */}
+        {/* 4. AJUSTES */}
         {tab === 'ajustes' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
             <form onSubmit={handleSaveSettings} style={{ background: '#fff', padding: '16px', borderRadius: '12px', border: '1px solid #cbd5e1' }}>
@@ -981,20 +1088,28 @@ export default function App() {
               </button>
             </form>
 
-            {/* SECCIÓN RESPALDOS (SOLUCIÓN BLINDADA PARA ANDROID) */}
+            {/* SECCIÓN RESPALDOS Y MIGRACIÓN */}
             <div style={{ background: '#fff', padding: '16px', borderRadius: '12px', border: '1px solid #cbd5e1' }}>
-              <h3 style={{ margin: '0 0 8px', fontSize: '0.9rem', fontWeight: 800 }}>📦 Copias de Seguridad (JSON)</h3>
+              <h3 style={{ margin: '0 0 8px', fontSize: '0.9rem', fontWeight: 800 }}>📦 Base de Datos y Respaldos</h3>
               <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0 0 12px' }}>
-                Guarda tu respaldo en Google Drive, WhatsApp o cópialo a tus notas para no perder nada.
+                Exporta, restaura o importa miembros masivamente desde MySQL.
               </p>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 <button
                   type="button"
+                  onClick={() => setShowImportMembersModal(true)}
+                  style={{ width: '100%', background: '#1e3a8a', color: '#fff', border: 'none', padding: '11px', borderRadius: '8px', fontWeight: 800, fontSize: '0.82rem', cursor: 'pointer' }}
+                >
+                  👥 Importar Miembros desde MySQL (JSON)
+                </button>
+
+                <button
+                  type="button"
                   onClick={openExportBackupModal}
                   style={{ width: '100%', background: '#047857', color: '#fff', border: 'none', padding: '11px', borderRadius: '8px', fontWeight: 800, fontSize: '0.82rem', cursor: 'pointer' }}
                 >
-                  📥 Exportar Copia de Seguridad
+                  📥 Exportar Respaldo Completo
                 </button>
 
                 <label style={{ width: '100%', background: '#f1f5f9', color: '#0f172a', border: '1px solid #cbd5e1', padding: '10px', borderRadius: '8px', fontWeight: 700, fontSize: '0.78rem', cursor: 'pointer', textAlign: 'center', boxSizing: 'border-box', display: 'block' }}>
@@ -1015,13 +1130,55 @@ export default function App() {
         )}
       </main>
 
-      {/* MODAL PARA EXPORTAR COPIA (3 OPCIONES INFALIBLES) */}
+      {/* MODAL PARA IMPORTAR MIEMBROS DESDE MYSQL */}
+      {showImportMembersModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 140 }}>
+          <div style={{ background: '#fff', width: '100%', maxWidth: '420px', borderRadius: '16px', padding: '18px', boxShadow: '0 10px 25px rgba(0,0,0,0.25)' }}>
+            <h3 style={{ margin: '0 0 6px', fontSize: '1rem', fontWeight: 800, color: '#0f172a' }}>👥 Importar Miembros desde MySQL</h3>
+            <p style={{ margin: '0 0 10px', fontSize: '0.72rem', color: '#64748b' }}>
+              Pega aquí el resultado JSON de tu consulta MySQL o sube el archivo exportado:
+            </p>
+
+            <textarea
+              rows={7}
+              value={importMembersText}
+              onChange={e => setImportMembersText(e.target.value)}
+              placeholder='[{"fullName": "Juan Pérez", "phone": "3001234567", "canLead": 1, "canPreach": 1}, ...]'
+              style={{ width: '100%', padding: '8px', fontSize: '0.68rem', fontFamily: 'monospace', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box', marginBottom: '10px' }}
+            />
+
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+              <label style={{ flex: 1, background: '#f1f5f9', color: '#0f172a', border: '1px solid #cbd5e1', padding: '9px', borderRadius: '8px', fontWeight: 700, fontSize: '0.72rem', cursor: 'pointer', textAlign: 'center' }}>
+                📁 Subir archivo .json
+                <input type="file" accept=".json" onChange={handleImportMembersFile} style={{ display: 'none' }} />
+              </label>
+
+              <button
+                onClick={handleImportMembersSubmit}
+                disabled={!importMembersText.trim()}
+                style={{ flex: 1, background: '#047857', color: '#fff', border: 'none', padding: '9px', borderRadius: '8px', fontWeight: 800, fontSize: '0.72rem', cursor: 'pointer', opacity: importMembersText.trim() ? 1 : 0.6 }}
+              >
+                Cargar Texto Pegado
+              </button>
+            </div>
+
+            <button
+              onClick={() => setShowImportMembersModal(false)}
+              style={{ width: '100%', padding: '9px', background: '#e2e8f0', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: 'pointer', fontSize: '0.78rem' }}
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL PARA EXPORTAR COPIA */}
       {showExportModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 130 }}>
           <div style={{ background: '#fff', width: '100%', maxWidth: '400px', borderRadius: '16px', padding: '18px', boxShadow: '0 10px 25px rgba(0,0,0,0.25)' }}>
             <h3 style={{ margin: '0 0 6px', fontSize: '1rem', fontWeight: 800, color: '#0f172a' }}>📥 Guardar Copia de Seguridad</h3>
             <p style={{ margin: '0 0 12px', fontSize: '0.73rem', color: '#64748b' }}>
-              Elige cómo deseas guardar tu respaldo de {isChurch ? 'la Iglesia' : 'la Célula'}:
+              Elige cómo deseas guardar tu respaldo:
             </p>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '14px' }}>
@@ -1047,7 +1204,6 @@ export default function App() {
               </button>
             </div>
 
-            <span style={{ display: 'block', fontSize: '0.68rem', fontWeight: 700, color: '#64748b', marginBottom: '4px' }}>Texto JSON generado:</span>
             <textarea
               readOnly
               rows={4}
@@ -1090,7 +1246,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Modal de Asignación / Edición (Selectores en orden A-Z) */}
+      {/* Modal de Asignación / Edición */}
       {selectedEvent && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 100 }}>
           <div style={{ background: '#fff', width: '100%', maxWidth: '420px', maxHeight: '90vh', overflowY: 'auto', borderRadius: '16px', padding: '18px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
