@@ -33,6 +33,13 @@ export default function App() {
   const [showImportMembersModal, setShowImportMembersModal] = useState(false);
   const [importMembersText, setImportMembersText] = useState('');
 
+  // Modal de edición de miembro existente
+  const [editingMember, setEditingMember] = useState<Member | null>(null);
+  const [editMemberName, setEditMemberName] = useState('');
+  const [editMemberPhone, setEditMemberPhone] = useState('');
+  const [editLeadRole, setEditLeadRole] = useState(false);
+  const [editPreachRole, setEditPreachRole] = useState(false);
+
   // Edición de culto
   const [selectedEvent, setSelectedEvent] = useState<CellEvent | null>(null);
   const [modalLeaderId, setModalLeaderId] = useState<string>('');
@@ -46,7 +53,7 @@ export default function App() {
   const [modalTime, setModalTime] = useState<string>('');
   const [modalStatus, setModalStatus] = useState<'Programado' | 'Realizado' | 'Cancelado'>('Programado');
 
-  // Formulario de Miembro
+  // Formulario de nuevo miembro
   const [newMemberName, setNewMemberName] = useState('');
   const [newMemberPhone, setNewMemberPhone] = useState('');
   const [canLeadRole, setCanLeadRole] = useState(false);
@@ -88,7 +95,7 @@ export default function App() {
 
   const isChurch = settings.entityType === 'iglesia';
 
-  // Orden alfabético estricto A - Z
+  // Orden alfabético A-Z
   const sortedMembers = [...members].sort((a, b) =>
     a.fullName.localeCompare(b.fullName, 'es', { sensitivity: 'base' })
   );
@@ -144,10 +151,10 @@ export default function App() {
     showMsg(`¡Configuración de ${formEntityType === 'iglesia' ? 'la Iglesia' : 'la Célula'} guardada!`);
   };
 
-  // IMPORTADOR INTELIGENTE DE MIEMBROS DESDE MYSQL (JSON O TEXTO)
+  // Importar desde MySQL
   const processImportMembersList = async (items: any[]) => {
     if (!Array.isArray(items) || items.length === 0) {
-      showMsg('No se encontraron registros de miembros válidos.');
+      showMsg('No se encontraron registros válidos.');
       return;
     }
 
@@ -157,7 +164,6 @@ export default function App() {
     let skippedCount = 0;
 
     for (const raw of items) {
-      // Buscar el nombre en cualquiera de sus variantes habituales
       const name = (raw.fullName || raw.nombre || raw.nombres || raw.name || raw.nombre_completo || '').toString().trim();
       if (!name) continue;
 
@@ -167,22 +173,16 @@ export default function App() {
       }
 
       const phone = (raw.phone || raw.telefono || raw.celular || raw.tel || '').toString().trim() || undefined;
-
       const isTruthy = (val: any) => val === true || val === 1 || val === '1' || val === 'true' || val === 'si' || val === 's';
-
-      const canLeadC = isTruthy(raw.canLeadCell || raw.dirige_celula || raw.dirige);
-      const canPreachC = isTruthy(raw.canPreachCell || raw.predica_celula || raw.predica);
-      const canLeadCh = isTruthy(raw.canLeadChurch || raw.dirige_iglesia || raw.dirige);
-      const canPreachCh = isTruthy(raw.canPreachChurch || raw.predica_iglesia || raw.predica);
 
       toInsert.push({
         id: 'm_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
         fullName: name,
         phone,
-        canLeadCell: canLeadC,
-        canPreachCell: canPreachC,
-        canLeadChurch: canLeadCh,
-        canPreachChurch: canPreachCh,
+        canLeadCell: isTruthy(raw.canLeadCell || raw.dirige_celula || raw.dirige),
+        canPreachCell: isTruthy(raw.canPreachCell || raw.predica_celula || raw.predica),
+        canLeadChurch: isTruthy(raw.canLeadChurch || raw.dirige_iglesia || raw.dirige),
+        canPreachChurch: isTruthy(raw.canPreachChurch || raw.predica_iglesia || raw.predica),
         isActive: true,
         createdAt: nowIso,
         updatedAt: nowIso
@@ -193,7 +193,7 @@ export default function App() {
     if (toInsert.length > 0) {
       await db.members.bulkAdd(toInsert);
       await loadAll();
-      showMsg(`¡${toInsert.length} hermanos importados con éxito! ${skippedCount > 0 ? `(${skippedCount} ya existían)` : ''}`);
+      showMsg(`¡${toInsert.length} hermanos importados! ${skippedCount > 0 ? `(${skippedCount} ya existían)` : ''}`);
       setShowImportMembersModal(false);
       setImportMembersText('');
     } else {
@@ -207,7 +207,7 @@ export default function App() {
       const list = Array.isArray(parsed) ? parsed : (parsed.members || parsed.data || []);
       processImportMembersList(list);
     } catch {
-      showMsg('El texto ingresado no es un JSON válido. Revisa el formato.');
+      showMsg('El texto ingresado no es un JSON válido.');
     }
   };
 
@@ -221,13 +221,13 @@ export default function App() {
         const list = Array.isArray(parsed) ? parsed : (parsed.members || parsed.data || []);
         await processImportMembersList(list);
       } catch {
-        showMsg('Error al leer el archivo JSON.');
+        showMsg('Error al leer el archivo.');
       }
     };
     reader.readAsText(file);
   };
 
-  // Respaldos Generales
+  // Respaldos
   const openExportBackupModal = () => {
     const data = {
       schemaVersion: 3,
@@ -236,8 +236,7 @@ export default function App() {
       members,
       events
     };
-    const jsonStr = JSON.stringify(data, null, 2);
-    setExportJsonText(jsonStr);
+    setExportJsonText(JSON.stringify(data, null, 2));
     setShowExportModal(true);
   };
 
@@ -245,7 +244,7 @@ export default function App() {
     try {
       if (navigator.clipboard && navigator.clipboard.writeText) {
         await navigator.clipboard.writeText(exportJsonText);
-        showMsg('¡Copia copiada al portapapeles con éxito!');
+        showMsg('¡Copia copiada al portapapeles!');
         return;
       }
     } catch {}
@@ -284,7 +283,7 @@ export default function App() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `Copia_Seguridad_${new Date().toISOString().substring(0, 10)}.json`;
+      a.download = `Copia_${new Date().toISOString().substring(0, 10)}.json`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -297,7 +296,7 @@ export default function App() {
 
   const processRestoreObject = async (parsed: any) => {
     if (!parsed.settings || !Array.isArray(parsed.members) || !Array.isArray(parsed.events)) {
-      showMsg('El archivo no contiene un formato de respaldo válido.');
+      showMsg('El archivo no contiene un formato válido.');
       return;
     }
     if (window.confirm('¿Deseas restaurar esta copia? Reemplazará los datos actuales.')) {
@@ -325,7 +324,7 @@ export default function App() {
         const parsed = JSON.parse(reader.result as string);
         await processRestoreObject(parsed);
       } catch {
-        showMsg('Error al leer el archivo JSON.');
+        showMsg('Error al leer el archivo.');
       }
     };
     reader.readAsText(file);
@@ -340,7 +339,7 @@ export default function App() {
     }
   };
 
-  // UN SOLO BOTÓN: Generar cultos y sortear
+  // UN SOLO BOTÓN: Generar y Asignar
   const handleGenerateAndAssign = async () => {
     const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
     const nowIso = new Date().toISOString();
@@ -541,6 +540,7 @@ export default function App() {
     showMsg(`⚡ ¡Mes generado y hermanos asignados para ${isChurch ? 'la Iglesia' : 'la Célula'}!`);
   };
 
+  // Edición de culto
   const openEditEvent = (ev: CellEvent) => {
     setSelectedEvent(ev);
     setModalLeaderId(ev.leaderId || '');
@@ -586,6 +586,7 @@ export default function App() {
     }
   };
 
+  // Compartir por WhatsApp
   const handleShareWhatsApp = () => {
     const ym = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
     const targetEvents = events
@@ -643,6 +644,7 @@ export default function App() {
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
   };
 
+  // Registrar nuevo miembro
   const handleAddMember = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMemberName.trim()) return;
@@ -669,6 +671,39 @@ export default function App() {
     showMsg(`Hermano agregado para ${isChurch ? 'la Iglesia' : 'la Célula'}.`);
   };
 
+  // EDITAR MIEMBRO EXISTENTE
+  const openEditMember = (m: Member) => {
+    setEditingMember(m);
+    setEditMemberName(m.fullName);
+    setEditMemberPhone(m.phone || '');
+    setEditLeadRole(memberCanLead(m));
+    setEditPreachRole(memberCanPreach(m));
+  };
+
+  const handleSaveEditMember = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingMember || !editMemberName.trim()) return;
+
+    const updates: Partial<Member> = {
+      fullName: editMemberName.trim(),
+      phone: editMemberPhone.trim() || undefined,
+      updatedAt: new Date().toISOString()
+    };
+
+    if (isChurch) {
+      updates.canLeadChurch = editLeadRole;
+      updates.canPreachChurch = editPreachRole;
+    } else {
+      updates.canLeadCell = editLeadRole;
+      updates.canPreachCell = editPreachRole;
+    }
+
+    await db.members.update(editingMember.id, updates);
+    setEditingMember(null);
+    await loadAll();
+    showMsg('¡Hermano actualizado con éxito!');
+  };
+
   const handleDeleteMember = async (id: string, name: string) => {
     if (window.confirm(`¿Seguro que deseas eliminar a ${name}?`)) {
       await db.members.delete(id);
@@ -678,7 +713,6 @@ export default function App() {
   };
 
   const ymCurrent = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
-
   const visibleEvents = events.filter(e => {
     if (!e.date.startsWith(ymCurrent)) return false;
     return isChurch ? e.type !== 'Servicio de célula' : e.type === 'Servicio de célula';
@@ -889,10 +923,9 @@ export default function App() {
           </div>
         )}
 
-        {/* 3. MIEMBROS (CON BOTÓN PARA IMPORTAR DESDE MYSQL) */}
+        {/* 3. MIEMBROS (CON EDITAR Y ELIMINAR) */}
         {tab === 'miembros' && (
           <div>
-            {/* Botón destacado para importar desde MySQL */}
             <button
               onClick={() => setShowImportMembersModal(true)}
               style={{
@@ -954,6 +987,7 @@ export default function App() {
               <span style={{ fontSize: '0.7rem', color: '#64748b' }}>{sortedMembers.length} hermanos</span>
             </div>
 
+            {/* Listado con botones EDITAR y ELIMINAR */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {sortedMembers.map(m => {
                 const canL = memberCanLead(m);
@@ -961,7 +995,7 @@ export default function App() {
 
                 return (
                   <div key={m.id} style={{ background: '#fff', padding: '12px', borderRadius: '10px', border: '1px solid #cbd5e1', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div>
+                    <div style={{ flex: 1, marginRight: '8px' }}>
                       <div style={{ fontWeight: 800, fontSize: '0.88rem' }}>{m.fullName}</div>
                       {m.phone && <div style={{ fontSize: '0.75rem', color: '#64748b' }}>📞 {m.phone}</div>}
 
@@ -983,9 +1017,22 @@ export default function App() {
                         )}
                       </div>
                     </div>
-                    <button onClick={() => handleDeleteMember(m.id, m.fullName)} style={{ background: '#fee2e2', color: '#991b1b', border: 'none', padding: '6px 10px', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer' }}>
-                      Eliminar
-                    </button>
+
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <button
+                        onClick={() => openEditMember(m)}
+                        style={{ background: '#1e293b', color: '#fff', border: 'none', padding: '6px 10px', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer' }}
+                      >
+                        ✏️ Editar
+                      </button>
+
+                      <button
+                        onClick={() => handleDeleteMember(m.id, m.fullName)}
+                        style={{ background: '#fee2e2', color: '#991b1b', border: 'none', padding: '6px 10px', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer' }}
+                      >
+                        Eliminar
+                      </button>
+                    </div>
                   </div>
                 );
               })}
@@ -1088,7 +1135,6 @@ export default function App() {
               </button>
             </form>
 
-            {/* SECCIÓN RESPALDOS Y MIGRACIÓN */}
             <div style={{ background: '#fff', padding: '16px', borderRadius: '12px', border: '1px solid #cbd5e1' }}>
               <h3 style={{ margin: '0 0 8px', fontSize: '0.9rem', fontWeight: 800 }}>📦 Base de Datos y Respaldos</h3>
               <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0 0 12px' }}>
@@ -1129,6 +1175,77 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {/* MODAL PARA EDITAR HERMANO EXISTENTE */}
+      {editingMember && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 150 }}>
+          <div style={{ background: '#fff', width: '100%', maxWidth: '380px', borderRadius: '16px', padding: '18px', boxShadow: '0 10px 25px rgba(0,0,0,0.25)' }}>
+            <h3 style={{ margin: '0 0 6px', fontSize: '1rem', fontWeight: 800, color: '#0f172a' }}>✏️ Editar Hermano</h3>
+            <p style={{ margin: '0 0 12px', fontSize: '0.72rem', color: '#64748b' }}>Actualiza los datos o roles de este miembro:</p>
+
+            <form onSubmit={handleSaveEditMember} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, marginBottom: '2px' }}>Nombre completo *:</label>
+                <input
+                  type="text"
+                  required
+                  value={editMemberName}
+                  onChange={e => setEditMemberName(e.target.value)}
+                  style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, marginBottom: '2px' }}>Teléfono (opcional):</label>
+                <input
+                  type="text"
+                  value={editMemberPhone}
+                  onChange={e => setEditMemberPhone(e.target.value)}
+                  style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
+                />
+              </div>
+
+              {isChurch ? (
+                <div style={{ background: '#eff6ff', padding: '10px', borderRadius: '8px', border: '1px solid #bfdbfe' }}>
+                  <span style={{ display: 'block', fontSize: '0.72rem', fontWeight: 800, color: '#1e40af', marginBottom: '6px' }}>
+                    🏛️ Capacidades en la IGLESIA:
+                  </span>
+                  <div style={{ display: 'flex', gap: '14px', fontSize: '0.76rem' }}>
+                    <label><input type="checkbox" checked={editLeadRole} onChange={e => setEditLeadRole(e.target.checked)} /> Puede dirigir</label>
+                    <label><input type="checkbox" checked={editPreachRole} onChange={e => setEditPreachRole(e.target.checked)} /> Puede predicar</label>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ background: '#f0fdf4', padding: '10px', borderRadius: '8px', border: '1px solid #bbf7d0' }}>
+                  <span style={{ display: 'block', fontSize: '0.72rem', fontWeight: 800, color: '#166534', marginBottom: '6px' }}>
+                    🏠 Capacidades en la CÉLULA:
+                  </span>
+                  <div style={{ display: 'flex', gap: '14px', fontSize: '0.76rem' }}>
+                    <label><input type="checkbox" checked={editLeadRole} onChange={e => setEditLeadRole(e.target.checked)} /> Puede dirigir</label>
+                    <label><input type="checkbox" checked={editPreachRole} onChange={e => setEditPreachRole(e.target.checked)} /> Puede predicar</label>
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                <button
+                  type="button"
+                  onClick={() => setEditingMember(null)}
+                  style={{ flex: 1, padding: '10px', background: '#e2e8f0', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: 'pointer', fontSize: '0.78rem' }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  style={{ flex: 1, padding: '10px', background: '#0f172a', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: 'pointer', fontSize: '0.78rem' }}
+                >
+                  Guardar Cambios
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* MODAL PARA IMPORTAR MIEMBROS DESDE MYSQL */}
       {showImportMembersModal && (
@@ -1246,7 +1363,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Modal de Asignación / Edición */}
+      {/* Modal de Asignación / Edición de Culto */}
       {selectedEvent && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 100 }}>
           <div style={{ background: '#fff', width: '100%', maxWidth: '420px', maxHeight: '90vh', overflowY: 'auto', borderRadius: '16px', padding: '18px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
