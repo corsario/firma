@@ -15,6 +15,9 @@ export default function App() {
   const [currentYear, setCurrentYear] = useState(today.getFullYear());
   const [currentMonth, setCurrentMonth] = useState(today.getMonth());
 
+  // Buscador de miembros
+  const [memberSearch, setMemberSearch] = useState('');
+
   // Formulario en Ajustes
   const [formEntityType, setFormEntityType] = useState<'iglesia' | 'celula'>('iglesia');
   const [formChurchName, setFormChurchName] = useState('LEHV-La catedral del Avivamiento');
@@ -25,7 +28,7 @@ export default function App() {
   const [formCellDay, setFormCellDay] = useState(3);
   const [formCellTime, setFormCellTime] = useState('18:00');
 
-  // Modales de Respaldo e Importación MySQL
+  // Modales de Respaldo e Importación
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportJsonText, setExportJsonText] = useState('');
   const [showPasteModal, setShowPasteModal] = useState(false);
@@ -33,7 +36,7 @@ export default function App() {
   const [showImportMembersModal, setShowImportMembersModal] = useState(false);
   const [importMembersText, setImportMembersText] = useState('');
 
-  // Modal de edición de miembro existente
+  // Modal de edición de miembro
   const [editingMember, setEditingMember] = useState<Member | null>(null);
   const [editMemberName, setEditMemberName] = useState('');
   const [editMemberPhone, setEditMemberPhone] = useState('');
@@ -95,15 +98,24 @@ export default function App() {
 
   const isChurch = settings.entityType === 'iglesia';
 
-  // Orden alfabético A-Z
+  // Orden alfabético estricto A - Z
   const sortedMembers = [...members].sort((a, b) =>
     a.fullName.localeCompare(b.fullName, 'es', { sensitivity: 'base' })
+  );
+
+  const filteredMembers = sortedMembers.filter(m =>
+    m.fullName.toLowerCase().includes(memberSearch.toLowerCase()) ||
+    (m.phone && m.phone.includes(memberSearch))
   );
 
   const getMemberName = (id: string | null | undefined) => {
     if (!id) return null;
     const m = members.find(x => x.id === id);
     return m ? m.fullName : null;
+  };
+
+  const getInitials = (name: string) => {
+    return name.split(' ').map(n => n[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
   };
 
   const memberCanLead = (m: Member) => {
@@ -339,7 +351,7 @@ export default function App() {
     }
   };
 
-  // UN SOLO BOTÓN: Generar y Asignar
+  // UN SOLO BOTÓN: Generar y Asignar Mes
   const handleGenerateAndAssign = async () => {
     const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
     const nowIso = new Date().toISOString();
@@ -540,7 +552,6 @@ export default function App() {
     showMsg(`⚡ ¡Mes generado y hermanos asignados para ${isChurch ? 'la Iglesia' : 'la Célula'}!`);
   };
 
-  // Edición de culto
   const openEditEvent = (ev: CellEvent) => {
     setSelectedEvent(ev);
     setModalLeaderId(ev.leaderId || '');
@@ -586,7 +597,6 @@ export default function App() {
     }
   };
 
-  // Compartir por WhatsApp
   const handleShareWhatsApp = () => {
     const ym = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
     const targetEvents = events
@@ -671,7 +681,7 @@ export default function App() {
     showMsg(`Hermano agregado para ${isChurch ? 'la Iglesia' : 'la Célula'}.`);
   };
 
-  // EDITAR MIEMBRO EXISTENTE
+  // Editar miembro existente
   const openEditMember = (m: Member) => {
     setEditingMember(m);
     setEditMemberName(m.fullName);
@@ -719,58 +729,64 @@ export default function App() {
   });
 
   return (
-    <div style={{ maxWidth: '480px', margin: '0 auto', minHeight: '100vh', background: '#f1f5f9', paddingBottom: '75px', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ maxWidth: '480px', margin: '0 auto', minHeight: '100vh', background: '#f8fafc', paddingBottom: '80px', display: 'flex', flexDirection: 'column', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
       
-      {/* 1. ENCABEZADO */}
-      <header style={{ background: '#0f172a', color: '#ffffff', padding: '14px 16px', borderBottom: '3px solid #b45309' }}>
+      {/* 1. ENCABEZADO ELEGANTE */}
+      <header style={{ background: 'linear-gradient(135deg, #0f172a, #172554)', color: '#ffffff', padding: '16px 18px', borderBottom: '3px solid #b45309', boxShadow: '0 4px 12px rgba(15, 23, 42, 0.15)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
-            <h1 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800 }}>
-              {isChurch ? settings.churchName : settings.cellName}
-            </h1>
-            <p style={{ margin: 0, fontSize: '0.74rem', color: '#f59e0b', fontWeight: 600 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '1.2rem' }}>{isChurch ? '🏛️' : '🏠'}</span>
+              <h1 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, letterSpacing: '-0.02em', color: '#f8fafc' }}>
+                {isChurch ? settings.churchName : settings.cellName}
+              </h1>
+            </div>
+            <p style={{ margin: '4px 0 0 28px', fontSize: '0.74rem', color: '#f59e0b', fontWeight: 600 }}>
               {isChurch ? settings.churchLocation : `${settings.territory} • ${settings.cellLocation}`}
             </p>
           </div>
-          <span style={{ fontSize: '0.68rem', background: isChurch ? '#1e40af' : '#166534', padding: '4px 8px', borderRadius: '6px', color: '#fff', fontWeight: 700 }}>
+          <span style={{ fontSize: '0.68rem', background: isChurch ? 'rgba(30, 64, 175, 0.8)' : 'rgba(22, 101, 52, 0.8)', border: '1px solid rgba(255,255,255,0.2)', padding: '5px 10px', borderRadius: '20px', color: '#fff', fontWeight: 800, letterSpacing: '0.05em' }}>
             {isChurch ? 'IGLESIA' : 'CÉLULA'}
           </span>
         </div>
       </header>
 
+      {/* Notificación Toast Flotante */}
       {notice && (
-        <div style={{ background: '#172554', color: '#fff', padding: '9px 12px', fontSize: '0.8rem', textAlign: 'center', fontWeight: 600 }}>
+        <div style={{ background: '#0f172a', color: '#f8fafc', padding: '10px 16px', fontSize: '0.82rem', textAlign: 'center', fontWeight: 700, borderBottom: '2px solid #f59e0b', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
           {notice}
         </div>
       )}
 
       {/* 2. CONTENIDO PRINCIPAL */}
-      <main style={{ padding: '14px', flex: 1 }}>
+      <main style={{ padding: '16px', flex: 1 }}>
 
         {/* 1. CALENDARIO */}
         {tab === 'calendario' && (
           <div>
-            <div style={{ background: '#ffffff', padding: '10px 14px', borderRadius: '12px', border: '1px solid #cbd5e1', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-              <button onClick={() => { if (currentMonth === 0) { setCurrentMonth(11); setCurrentYear(y => y - 1); } else { setCurrentMonth(m => m - 1); } }} style={{ background: '#f1f5f9', border: '1px solid #cbd5e1', padding: '6px 12px', borderRadius: '8px', cursor: 'pointer', fontWeight: 700 }}>◀</button>
+            {/* Navegación del mes */}
+            <div style={{ background: '#ffffff', padding: '12px 16px', borderRadius: '16px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
+              <button onClick={() => { if (currentMonth === 0) { setCurrentMonth(11); setCurrentYear(y => y - 1); } else { setCurrentMonth(m => m - 1); } }} style={{ background: '#f1f5f9', border: 'none', width: '36px', height: '36px', borderRadius: '10px', cursor: 'pointer', fontWeight: 800, color: '#334155' }}>◀</button>
               <div style={{ textAlign: 'center' }}>
-                <span style={{ fontSize: '1rem', fontWeight: 800, color: '#0f172a' }}>{MONTH_NAMES[currentMonth]} {currentYear}</span>
-                <span style={{ display: 'block', fontSize: '0.7rem', color: '#64748b' }}>
-                  {visibleEvents.length} actividad(es) de {isChurch ? 'la Iglesia' : 'la Célula'}
+                <span style={{ fontSize: '1.05rem', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em' }}>{MONTH_NAMES[currentMonth]} {currentYear}</span>
+                <span style={{ display: 'block', fontSize: '0.72rem', color: '#64748b', fontWeight: 600, marginTop: '2px' }}>
+                  {visibleEvents.length} culto(s) en {isChurch ? 'la Iglesia' : 'la Célula'}
                 </span>
               </div>
-              <button onClick={() => { if (currentMonth === 11) { setCurrentMonth(0); setCurrentYear(y => y + 1); } else { setCurrentMonth(m => m + 1); } }} style={{ background: '#f1f5f9', border: '1px solid #cbd5e1', padding: '6px 12px', borderRadius: '8px', cursor: 'pointer', fontWeight: 700 }}>▶</button>
+              <button onClick={() => { if (currentMonth === 11) { setCurrentMonth(0); setCurrentYear(y => y + 1); } else { setCurrentMonth(m => m + 1); } }} style={{ background: '#f1f5f9', border: 'none', width: '36px', height: '36px', borderRadius: '10px', cursor: 'pointer', fontWeight: 800, color: '#334155' }}>▶</button>
             </div>
 
+            {/* UN SOLO BOTÓN PRINCIPAL: GENERAR Y ASIGNAR */}
             <button
               onClick={handleGenerateAndAssign}
               style={{
                 width: '100%',
-                background: isChurch ? '#1e3a8a' : '#065f46',
+                background: isChurch ? 'linear-gradient(135deg, #1e3a8a, #0f172a)' : 'linear-gradient(135deg, #065f46, #022c22)',
                 color: '#fff',
                 border: 'none',
-                padding: '13px',
-                borderRadius: '11px',
-                fontSize: '0.85rem',
+                padding: '14px',
+                borderRadius: '14px',
+                fontSize: '0.88rem',
                 fontWeight: 800,
                 cursor: 'pointer',
                 marginBottom: '10px',
@@ -778,41 +794,44 @@ export default function App() {
                 justifyContent: 'center',
                 alignItems: 'center',
                 gap: '8px',
-                boxShadow: '0 2px 5px rgba(0,0,0,0.15)'
+                boxShadow: isChurch ? '0 4px 12px rgba(30, 58, 138, 0.25)' : '0 4px 12px rgba(6, 95, 70, 0.25)'
               }}
             >
               <span>⚡</span>
               <span>{isChurch ? 'Generar y Asignar Mes (Iglesia)' : 'Generar y Asignar Mes (Célula)'}</span>
             </button>
 
+            {/* Botón WhatsApp */}
             <button
               onClick={handleShareWhatsApp}
               style={{
                 width: '100%',
-                background: '#059669',
+                background: 'linear-gradient(135deg, #059669, #047857)',
                 color: '#fff',
                 border: 'none',
-                padding: '12px',
-                borderRadius: '11px',
-                fontSize: '0.82rem',
+                padding: '13px',
+                borderRadius: '14px',
+                fontSize: '0.84rem',
                 fontWeight: 800,
                 cursor: 'pointer',
-                marginBottom: '14px',
+                marginBottom: '16px',
                 display: 'flex',
                 justifyContent: 'center',
                 alignItems: 'center',
                 gap: '8px',
-                boxShadow: '0 3px 6px rgba(0,0,0,0.1)'
+                boxShadow: '0 4px 10px rgba(5, 150, 105, 0.2)'
               }}
             >
               <span>📲</span>
               <span>Compartir Programación por WhatsApp</span>
             </button>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {/* Lista de cultos */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               {visibleEvents.length === 0 ? (
-                <div style={{ background: '#fff', padding: '24px', borderRadius: '12px', textAlign: 'center', color: '#64748b', fontSize: '0.85rem' }}>
-                  No hay cultos programados en este mes.<br/>
+                <div style={{ background: '#fff', padding: '32px 20px', borderRadius: '18px', textAlign: 'center', color: '#64748b', fontSize: '0.85rem', border: '1px dashed #cbd5e1' }}>
+                  <div style={{ fontSize: '2rem', marginBottom: '8px' }}>📅</div>
+                  No hay cultos programados para este mes.<br/>
                   Pulsa arriba <strong>"⚡ Generar y Asignar Mes"</strong> para crearlos y sortearlos en 1 segundo.
                 </div>
               ) : (
@@ -827,49 +846,52 @@ export default function App() {
                       key={ev.id}
                       style={{
                         background: '#ffffff',
-                        borderRadius: '12px',
-                        border: isCena ? '2px solid #b45309' : '1px solid #cbd5e1',
-                        padding: '14px',
-                        boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+                        borderRadius: '18px',
+                        border: isCena ? '2px solid #b45309' : isChurch ? '1px solid #e2e8f0' : '1px solid #bbf7d0',
+                        padding: '16px',
+                        boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+                        position: 'relative'
                       }}
                     >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                        <span style={{ fontWeight: 800, fontSize: '0.9rem', color: '#0f172a' }}>📅 {formatFriendlyDate(ev.date)}</span>
-                        <span style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600 }}>🕕 {formatFriendlyTime(ev.startTime)}</span>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                        <span style={{ fontWeight: 800, fontSize: '0.92rem', color: '#0f172a' }}>📅 {formatFriendlyDate(ev.date)}</span>
+                        <span style={{ fontSize: '0.74rem', color: '#475569', fontWeight: 700, background: '#f1f5f9', padding: '3px 8px', borderRadius: '8px' }}>🕕 {formatFriendlyTime(ev.startTime)}</span>
                       </div>
 
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                        <span style={{ fontSize: '0.82rem', fontWeight: 700, color: isCena ? '#b45309' : '#1e3a8a' }}>
-                          {isCena ? '🍷 ' + ev.title : ev.title}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <span style={{ fontSize: '0.86rem', fontWeight: 800, color: isCena ? '#b45309' : isChurch ? '#1e3a8a' : '#065f46' }}>
+                          {isCena ? '🍷 ' + ev.title : isChurch ? '⛪ ' + ev.title : '🏠 ' + ev.title}
                         </span>
-                        <span style={{ fontSize: '0.68rem', background: '#f1f5f9', padding: '2px 6px', borderRadius: '4px', color: '#475569' }}>
-                          {ev.location || (isChurch ? settings.churchLocation : settings.cellLocation)}
+                        <span style={{ fontSize: '0.7rem', color: '#64748b' }}>
+                          📍 {ev.location || (isChurch ? settings.churchLocation : settings.cellLocation)}
                         </span>
                       </div>
 
                       {isChurch && isSunday && (
-                        <div style={{ background: '#f8fafc', padding: '4px 8px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.7rem', color: '#475569', marginBottom: '8px', fontWeight: 600 }}>
+                        <div style={{ background: '#f8fafc', padding: '6px 10px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '0.72rem', color: '#334155', marginBottom: '10px', fontWeight: 600 }}>
                           📖 9:00 a. m. Curso de Bautismo (previo a la Escuela)
                         </div>
                       )}
 
-                      <div style={{ background: '#f8fafc', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: isCena ? '8px' : '10px' }}>
+                      {/* Tarjetas de Responsables */}
+                      <div style={{ background: '#f8fafc', padding: '10px 12px', borderRadius: '12px', border: '1px solid #e2e8f0', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: isCena ? '8px' : '12px' }}>
                         <div>
-                          <span style={{ display: 'block', fontSize: '0.65rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 700 }}>Dirige:</span>
-                          <span style={{ fontSize: '0.82rem', fontWeight: 700, color: leaderName ? '#1e3a8a' : '#d97706' }}>
+                          <span style={{ display: 'block', fontSize: '0.66rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 700 }}>Dirige:</span>
+                          <span style={{ fontSize: '0.84rem', fontWeight: 700, color: leaderName ? '#0f172a' : '#d97706' }}>
                             {leaderName || '⚠️ Pendiente'}
                           </span>
                         </div>
                         <div>
-                          <span style={{ display: 'block', fontSize: '0.65rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 700 }}>Predica:</span>
-                          <span style={{ fontSize: '0.82rem', fontWeight: 700, color: preacherName ? '#1e3a8a' : '#d97706' }}>
+                          <span style={{ display: 'block', fontSize: '0.66rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 700 }}>Predica:</span>
+                          <span style={{ fontSize: '0.84rem', fontWeight: 700, color: preacherName ? '#0f172a' : '#d97706' }}>
                             {preacherName || '⚠️ Pendiente'}
                           </span>
                         </div>
                       </div>
 
+                      {/* Santa Cena */}
                       {isCena && (
-                        <div style={{ background: '#fef3c7', padding: '10px', borderRadius: '8px', border: '1px solid #fde68a', marginBottom: '10px', fontSize: '0.75rem' }}>
+                        <div style={{ background: '#fef3c7', padding: '12px', borderRadius: '12px', border: '1px solid #fde68a', marginBottom: '12px', fontSize: '0.75rem' }}>
                           <div style={{ fontWeight: 800, color: '#92400e', marginBottom: '6px' }}>🍞🍷 Encargados de la Cena del Señor:</div>
                           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginBottom: '6px' }}>
                             <div><strong>Ora por el Pan:</strong> {getMemberName(ev.breadPrayerMemberId) || '⚠️ Pendiente'}</div>
@@ -881,7 +903,7 @@ export default function App() {
                         </div>
                       )}
 
-                      <button onClick={() => openEditEvent(ev)} style={{ width: '100%', background: '#1e293b', color: '#fff', border: 'none', padding: '9px', borderRadius: '8px', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer' }}>
+                      <button onClick={() => openEditEvent(ev)} style={{ width: '100%', background: '#f1f5f9', color: '#0f172a', border: '1px solid #cbd5e1', padding: '9px', borderRadius: '10px', fontSize: '0.76rem', fontWeight: 700, cursor: 'pointer' }}>
                         ✏️ Asignar Hermanos / Editar
                       </button>
                     </div>
@@ -895,140 +917,159 @@ export default function App() {
         {/* 2. INICIO */}
         {tab === 'inicio' && (
           <div>
-            <div style={{ background: 'linear-gradient(135deg, #0f172a, #172554)', color: '#fff', padding: '18px', borderRadius: '16px', marginBottom: '16px', border: '1px solid #b45309' }}>
-              <span style={{ fontSize: '0.7rem', color: '#f59e0b', textTransform: 'uppercase', fontWeight: 700 }}>
-                {isChurch ? 'Iglesia Activa' : 'Célula Activa'}
+            <div style={{ background: 'linear-gradient(135deg, #0f172a, #1e3a8a)', color: '#fff', padding: '22px 18px', borderRadius: '20px', marginBottom: '16px', border: '1px solid #b45309', boxShadow: '0 8px 16px rgba(15, 23, 42, 0.15)' }}>
+              <span style={{ fontSize: '0.7rem', color: '#f59e0b', textTransform: 'uppercase', fontWeight: 800, letterSpacing: '0.05em' }}>
+                {isChurch ? '🏛️ Iglesia Activa' : '🏠 Célula Activa'}
               </span>
-              <h2 style={{ margin: '6px 0', fontSize: '1.2rem' }}>
+              <h2 style={{ margin: '8px 0 4px', fontSize: '1.3rem', fontWeight: 800, letterSpacing: '-0.02em' }}>
                 {isChurch ? settings.churchName : settings.cellName}
               </h2>
-              <p style={{ margin: 0, fontSize: '0.85rem', color: '#cbd5e1' }}>
+              <p style={{ margin: 0, fontSize: '0.84rem', color: '#cbd5e1' }}>
                 {isChurch ? settings.churchLocation : `${settings.territory} • ${settings.cellLocation}`}
               </p>
-              <button onClick={() => setTab('calendario')} style={{ marginTop: '14px', background: '#b45309', border: 'none', color: '#fff', padding: '9px 16px', borderRadius: '8px', fontSize: '0.8rem', fontWeight: 700, cursor: 'pointer' }}>
-                📅 Ver Calendario
+              <button onClick={() => setTab('calendario')} style={{ marginTop: '16px', background: '#f59e0b', border: 'none', color: '#0f172a', padding: '10px 18px', borderRadius: '10px', fontSize: '0.82rem', fontWeight: 800, cursor: 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
+                📅 Abrir Calendario
               </button>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-              <div style={{ background: '#fff', padding: '14px', borderRadius: '12px', border: '1px solid #cbd5e1' }}>
-                <span style={{ fontSize: '0.75rem', color: '#64748b' }}>Hermanos en lista</span>
-                <p style={{ margin: '4px 0 0', fontSize: '1.5rem', fontWeight: 800, color: '#0f172a' }}>{members.length}</p>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <div style={{ background: '#fff', padding: '16px', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+                <span style={{ fontSize: '0.74rem', color: '#64748b', fontWeight: 600 }}>Hermanos en lista</span>
+                <p style={{ margin: '6px 0 0', fontSize: '1.6rem', fontWeight: 800, color: '#0f172a' }}>{members.length}</p>
               </div>
-              <div style={{ background: '#fff', padding: '14px', borderRadius: '12px', border: '1px solid #cbd5e1' }}>
-                <span style={{ fontSize: '0.75rem', color: '#64748b' }}>Cultos este mes</span>
-                <p style={{ margin: '4px 0 0', fontSize: '1.5rem', fontWeight: 800, color: '#0f172a' }}>{visibleEvents.length}</p>
+              <div style={{ background: '#fff', padding: '16px', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+                <span style={{ fontSize: '0.74rem', color: '#64748b', fontWeight: 600 }}>Cultos este mes</span>
+                <p style={{ margin: '6px 0 0', fontSize: '1.6rem', fontWeight: 800, color: '#0f172a' }}>{visibleEvents.length}</p>
               </div>
             </div>
           </div>
         )}
 
-        {/* 3. MIEMBROS (CON EDITAR Y ELIMINAR) */}
+        {/* 3. MIEMBROS */}
         {tab === 'miembros' && (
           <div>
+            {/* Buscador de miembros en vivo */}
+            <div style={{ position: 'relative', marginBottom: '12px' }}>
+              <input
+                type="text"
+                placeholder="🔍 Buscar hermano por nombre o teléfono..."
+                value={memberSearch}
+                onChange={e => setMemberSearch(e.target.value)}
+                style={{ width: '100%', padding: '11px 14px', borderRadius: '12px', border: '1px solid #cbd5e1', background: '#ffffff', fontSize: '0.82rem', boxSizing: 'border-box', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}
+              />
+            </div>
+
             <button
               onClick={() => setShowImportMembersModal(true)}
               style={{
                 width: '100%',
-                background: '#1e3a8a',
+                background: 'linear-gradient(135deg, #1e3a8a, #0f172a)',
                 color: '#fff',
                 border: 'none',
-                padding: '11px',
-                borderRadius: '10px',
+                padding: '12px',
+                borderRadius: '12px',
                 fontWeight: 800,
                 fontSize: '0.82rem',
                 cursor: 'pointer',
-                marginBottom: '12px',
+                marginBottom: '14px',
                 display: 'flex',
                 justifyContent: 'center',
                 alignItems: 'center',
                 gap: '8px',
-                boxShadow: '0 2px 4px rgba(30, 58, 138, 0.2)'
+                boxShadow: '0 2px 6px rgba(30, 58, 138, 0.2)'
               }}
             >
               <span>👥</span>
               <span>Importar Hermanos desde MySQL / JSON</span>
             </button>
 
-            <form onSubmit={handleAddMember} style={{ background: '#fff', padding: '14px', borderRadius: '12px', border: '1px solid #cbd5e1', marginBottom: '14px' }}>
-              <h3 style={{ margin: '0 0 10px', fontSize: '0.9rem', fontWeight: 800 }}>
-                + Registrar Hermano Individual ({isChurch ? 'Iglesia' : 'Célula'})
+            {/* Formulario nuevo miembro */}
+            <form onSubmit={handleAddMember} style={{ background: '#fff', padding: '16px', borderRadius: '16px', border: '1px solid #e2e8f0', marginBottom: '16px', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+              <h3 style={{ margin: '0 0 10px', fontSize: '0.92rem', fontWeight: 800, color: '#0f172a' }}>
+                + Registrar Hermano ({isChurch ? 'Iglesia' : 'Célula'})
               </h3>
-              <input type="text" placeholder="Nombre completo *" value={newMemberName} onChange={e => setNewMemberName(e.target.value)} required style={{ width: '100%', padding: '9px', marginBottom: '8px', boxSizing: 'border-box', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
-              <input type="text" placeholder="Teléfono (opcional)" value={newMemberPhone} onChange={e => setNewMemberPhone(e.target.value)} style={{ width: '100%', padding: '9px', marginBottom: '10px', boxSizing: 'border-box', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
+              <input type="text" placeholder="Nombre completo *" value={newMemberName} onChange={e => setNewMemberName(e.target.value)} required style={{ width: '100%', padding: '10px', marginBottom: '8px', boxSizing: 'border-box', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '0.8rem' }} />
+              <input type="text" placeholder="Teléfono (opcional)" value={newMemberPhone} onChange={e => setNewMemberPhone(e.target.value)} style={{ width: '100%', padding: '10px', marginBottom: '12px', boxSizing: 'border-box', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '0.8rem' }} />
 
               {isChurch ? (
-                <div style={{ background: '#eff6ff', padding: '10px', borderRadius: '8px', marginBottom: '12px', border: '1px solid #bfdbfe' }}>
+                <div style={{ background: '#eff6ff', padding: '10px 12px', borderRadius: '10px', marginBottom: '12px', border: '1px solid #bfdbfe' }}>
                   <span style={{ display: 'block', fontSize: '0.74rem', fontWeight: 800, color: '#1e40af', marginBottom: '6px' }}>
                     🏛️ Capacidades en la IGLESIA:
                   </span>
                   <div style={{ display: 'flex', gap: '16px', fontSize: '0.78rem' }}>
-                    <label><input type="checkbox" checked={canLeadRole} onChange={e => setCanLeadRole(e.target.checked)} /> Puede dirigir en la iglesia</label>
-                    <label><input type="checkbox" checked={canPreachRole} onChange={e => setCanPreachRole(e.target.checked)} /> Puede predicar en la iglesia</label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><input type="checkbox" checked={canLeadRole} onChange={e => setCanLeadRole(e.target.checked)} /> Puede dirigir</label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><input type="checkbox" checked={canPreachRole} onChange={e => setCanPreachRole(e.target.checked)} /> Puede predicar</label>
                   </div>
                 </div>
               ) : (
-                <div style={{ background: '#f0fdf4', padding: '10px', borderRadius: '8px', marginBottom: '12px', border: '1px solid #bbf7d0' }}>
+                <div style={{ background: '#f0fdf4', padding: '10px 12px', borderRadius: '10px', marginBottom: '12px', border: '1px solid #bbf7d0' }}>
                   <span style={{ display: 'block', fontSize: '0.74rem', fontWeight: 800, color: '#166534', marginBottom: '6px' }}>
                     🏠 Capacidades en la CÉLULA:
                   </span>
                   <div style={{ display: 'flex', gap: '16px', fontSize: '0.78rem' }}>
-                    <label><input type="checkbox" checked={canLeadRole} onChange={e => setCanLeadRole(e.target.checked)} /> Puede dirigir en la célula</label>
-                    <label><input type="checkbox" checked={canPreachRole} onChange={e => setCanPreachRole(e.target.checked)} /> Puede predicar en la célula</label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><input type="checkbox" checked={canLeadRole} onChange={e => setCanLeadRole(e.target.checked)} /> Puede dirigir</label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><input type="checkbox" checked={canPreachRole} onChange={e => setCanPreachRole(e.target.checked)} /> Puede predicar</label>
                   </div>
                 </div>
               )}
 
-              <button type="submit" style={{ width: '100%', background: '#0f172a', color: '#fff', border: 'none', padding: '10px', borderRadius: '8px', fontWeight: 700, fontSize: '0.8rem', cursor: 'pointer' }}>Guardar Hermano</button>
+              <button type="submit" style={{ width: '100%', background: '#0f172a', color: '#fff', border: 'none', padding: '11px', borderRadius: '10px', fontWeight: 800, fontSize: '0.82rem', cursor: 'pointer' }}>Guardar Hermano</button>
             </form>
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', padding: '0 4px' }}>
-              <span style={{ fontSize: '0.75rem', fontWeight: 800, color: '#475569' }}>Directorio Alfabético (A - Z):</span>
-              <span style={{ fontSize: '0.7rem', color: '#64748b' }}>{sortedMembers.length} hermanos</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', padding: '0 4px' }}>
+              <span style={{ fontSize: '0.76rem', fontWeight: 800, color: '#475569' }}>Directorio Alfabético (A - Z):</span>
+              <span style={{ fontSize: '0.72rem', color: '#64748b' }}>{filteredMembers.length} de {members.length}</span>
             </div>
 
-            {/* Listado con botones EDITAR y ELIMINAR */}
+            {/* Listado con Avatares circulares y botones Edit/Del */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {sortedMembers.map(m => {
+              {filteredMembers.map(m => {
                 const canL = memberCanLead(m);
                 const canP = memberCanPreach(m);
+                const initials = getInitials(m.fullName);
 
                 return (
-                  <div key={m.id} style={{ background: '#fff', padding: '12px', borderRadius: '10px', border: '1px solid #cbd5e1', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div style={{ flex: 1, marginRight: '8px' }}>
-                      <div style={{ fontWeight: 800, fontSize: '0.88rem' }}>{m.fullName}</div>
-                      {m.phone && <div style={{ fontSize: '0.75rem', color: '#64748b' }}>📞 {m.phone}</div>}
+                  <div key={m.id} style={{ background: '#fff', padding: '12px 14px', borderRadius: '14px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: '0 1px 2px rgba(0,0,0,0.02)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, marginRight: '8px' }}>
+                      <div style={{ width: '38px', height: '38px', borderRadius: '50%', background: isChurch ? '#dbeafe' : '#dcfce7', color: isChurch ? '#1e40af' : '#166534', fontWeight: 800, fontSize: '0.82rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        {initials}
+                      </div>
 
-                      <div style={{ display: 'flex', gap: '4px', marginTop: '4px' }}>
-                        {canL && (
-                          <span style={{ background: isChurch ? '#dbeafe' : '#dcfce7', color: isChurch ? '#1e40af' : '#166534', fontSize: '0.65rem', padding: '2px 8px', borderRadius: '4px', fontWeight: 700 }}>
-                            ✓ Dirige
-                          </span>
-                        )}
-                        {canP && (
-                          <span style={{ background: '#fef3c7', color: '#92400e', fontSize: '0.65rem', padding: '2px 8px', borderRadius: '4px', fontWeight: 700 }}>
-                            ✓ Predica
-                          </span>
-                        )}
-                        {!canL && !canP && (
-                          <span style={{ background: '#f1f5f9', color: '#64748b', fontSize: '0.65rem', padding: '2px 6px', borderRadius: '4px' }}>
-                            Miembro
-                          </span>
-                        )}
+                      <div>
+                        <div style={{ fontWeight: 800, fontSize: '0.88rem', color: '#0f172a' }}>{m.fullName}</div>
+                        {m.phone && <div style={{ fontSize: '0.74rem', color: '#64748b' }}>📞 {m.phone}</div>}
+
+                        <div style={{ display: 'flex', gap: '4px', marginTop: '4px' }}>
+                          {canL && (
+                            <span style={{ background: isChurch ? '#eff6ff' : '#f0fdf4', color: isChurch ? '#1d4ed8' : '#15803d', border: isChurch ? '1px solid #bfdbfe' : '1px solid #bbf7d0', fontSize: '0.65rem', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>
+                              ✓ Dirige
+                            </span>
+                          )}
+                          {canP && (
+                            <span style={{ background: '#fef3c7', color: '#b45309', border: '1px solid #fde68a', fontSize: '0.65rem', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>
+                              ✓ Predica
+                            </span>
+                          )}
+                          {!canL && !canP && (
+                            <span style={{ background: '#f1f5f9', color: '#64748b', fontSize: '0.65rem', padding: '2px 6px', borderRadius: '4px' }}>
+                              Miembro
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
 
                     <div style={{ display: 'flex', gap: '6px' }}>
                       <button
                         onClick={() => openEditMember(m)}
-                        style={{ background: '#1e293b', color: '#fff', border: 'none', padding: '6px 10px', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer' }}
+                        style={{ background: '#f1f5f9', color: '#0f172a', border: '1px solid #cbd5e1', padding: '6px 10px', borderRadius: '8px', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer' }}
                       >
                         ✏️ Editar
                       </button>
 
                       <button
                         onClick={() => handleDeleteMember(m.id, m.fullName)}
-                        style={{ background: '#fee2e2', color: '#991b1b', border: 'none', padding: '6px 10px', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer' }}
+                        style={{ background: '#fee2e2', color: '#991b1b', border: 'none', padding: '6px 10px', borderRadius: '8px', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer' }}
                       >
                         Eliminar
                       </button>
@@ -1040,82 +1081,100 @@ export default function App() {
           </div>
         )}
 
-        {/* 4. AJUSTES */}
+        {/* 4. AJUSTES CONFIGURABLES */}
         {tab === 'ajustes' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-            <form onSubmit={handleSaveSettings} style={{ background: '#fff', padding: '16px', borderRadius: '12px', border: '1px solid #cbd5e1' }}>
-              <h3 style={{ margin: '0 0 12px', fontSize: '1rem', fontWeight: 800, color: '#0f172a' }}>⚙️ Configuración del Sistema</h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <form onSubmit={handleSaveSettings} style={{ background: '#fff', padding: '18px', borderRadius: '18px', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+              <h3 style={{ margin: '0 0 14px', fontSize: '1rem', fontWeight: 800, color: '#0f172a' }}>⚙️ Configuración del Sistema</h3>
 
-              <div style={{ background: '#f1f5f9', padding: '12px', borderRadius: '10px', border: '1px solid #cbd5e1', marginBottom: '14px' }}>
-                <span style={{ display: 'block', fontSize: '0.78rem', fontWeight: 800, color: '#0f172a', marginBottom: '8px' }}>
-                  ¿Qué deseas administrar en esta app?
+              {/* Selector interactivo de tarjetas */}
+              <div style={{ marginBottom: '16px' }}>
+                <span style={{ display: 'block', fontSize: '0.76rem', fontWeight: 800, color: '#475569', marginBottom: '8px' }}>
+                  ¿Qué deseas administrar en esta aplicación?
                 </span>
-                <div style={{ display: 'flex', gap: '14px' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: 700, cursor: 'pointer' }}>
-                    <input
-                      type="radio"
-                      name="entityType"
-                      value="iglesia"
-                      checked={formEntityType === 'iglesia'}
-                      onChange={() => setFormEntityType('iglesia')}
-                    />
-                    🏛️ Iglesia
-                  </label>
 
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: 700, cursor: 'pointer' }}>
-                    <input
-                      type="radio"
-                      name="entityType"
-                      value="celula"
-                      checked={formEntityType === 'celula'}
-                      onChange={() => setFormEntityType('celula')}
-                    />
-                    🏠 Célula
-                  </label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                  <div
+                    onClick={() => setFormEntityType('iglesia')}
+                    style={{
+                      border: formEntityType === 'iglesia' ? '2px solid #1e40af' : '1px solid #cbd5e1',
+                      background: formEntityType === 'iglesia' ? '#eff6ff' : '#ffffff',
+                      padding: '12px',
+                      borderRadius: '12px',
+                      cursor: 'pointer',
+                      textAlign: 'center',
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    <div style={{ fontSize: '1.4rem', marginBottom: '4px' }}>🏛️</div>
+                    <strong style={{ display: 'block', fontSize: '0.84rem', color: formEntityType === 'iglesia' ? '#1e40af' : '#334155' }}>
+                      Modo Iglesia
+                    </strong>
+                    <span style={{ fontSize: '0.68rem', color: '#64748b' }}>Templo Central</span>
+                  </div>
+
+                  <div
+                    onClick={() => setFormEntityType('celula')}
+                    style={{
+                      border: formEntityType === 'celula' ? '2px solid #166534' : '1px solid #cbd5e1',
+                      background: formEntityType === 'celula' ? '#f0fdf4' : '#ffffff',
+                      padding: '12px',
+                      borderRadius: '12px',
+                      cursor: 'pointer',
+                      textAlign: 'center',
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    <div style={{ fontSize: '1.4rem', marginBottom: '4px' }}>🏠</div>
+                    <strong style={{ display: 'block', fontSize: '0.84rem', color: formEntityType === 'celula' ? '#166534' : '#334155' }}>
+                      Modo Célula
+                    </strong>
+                    <span style={{ fontSize: '0.68rem', color: '#64748b' }}>Hogar / Territorio</span>
+                  </div>
                 </div>
               </div>
 
               {formEntityType === 'iglesia' ? (
-                <div style={{ background: '#eff6ff', padding: '12px', borderRadius: '8px', border: '1px solid #bfdbfe', marginBottom: '14px' }}>
-                  <span style={{ display: 'block', fontSize: '0.8rem', fontWeight: 800, color: '#1e40af', marginBottom: '8px' }}>
+                <div style={{ background: '#eff6ff', padding: '14px', borderRadius: '14px', border: '1px solid #bfdbfe', marginBottom: '16px' }}>
+                  <span style={{ display: 'block', fontSize: '0.8rem', fontWeight: 800, color: '#1e40af', marginBottom: '10px' }}>
                     🏛️ Datos de la IGLESIA:
                   </span>
 
-                  <div style={{ marginBottom: '8px' }}>
-                    <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: '#334155', marginBottom: '2px' }}>Nombre oficial de la Iglesia:</label>
-                    <input type="text" value={formChurchName} onChange={e => setFormChurchName(e.target.value)} required style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
+                  <div style={{ marginBottom: '10px' }}>
+                    <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: '#334155', marginBottom: '4px' }}>Nombre oficial de la Iglesia:</label>
+                    <input type="text" value={formChurchName} onChange={e => setFormChurchName(e.target.value)} required style={{ width: '100%', padding: '9px', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
                   </div>
 
                   <div>
-                    <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: '#334155', marginBottom: '2px' }}>Dirección física del Templo Central:</label>
-                    <input type="text" value={formChurchLocation} onChange={e => setFormChurchLocation(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
+                    <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: '#334155', marginBottom: '4px' }}>Dirección física del Templo Central:</label>
+                    <input type="text" value={formChurchLocation} onChange={e => setFormChurchLocation(e.target.value)} style={{ width: '100%', padding: '9px', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
                   </div>
                 </div>
               ) : (
-                <div style={{ background: '#f0fdf4', padding: '12px', borderRadius: '8px', border: '1px solid #bbf7d0', marginBottom: '14px' }}>
-                  <span style={{ display: 'block', fontSize: '0.8rem', fontWeight: 800, color: '#166534', marginBottom: '8px' }}>
+                <div style={{ background: '#f0fdf4', padding: '14px', borderRadius: '14px', border: '1px solid #bbf7d0', marginBottom: '16px' }}>
+                  <span style={{ display: 'block', fontSize: '0.8rem', fontWeight: 800, color: '#166534', marginBottom: '10px' }}>
                     🏠 Datos de la CÉLULA:
                   </span>
 
                   <div style={{ marginBottom: '8px' }}>
                     <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: '#334155', marginBottom: '2px' }}>Nombre de la Célula:</label>
-                    <input type="text" value={formCellName} onChange={e => setFormCellName(e.target.value)} required style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
+                    <input type="text" value={formCellName} onChange={e => setFormCellName(e.target.value)} required style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
                   </div>
 
                   <div style={{ marginBottom: '8px' }}>
                     <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: '#334155', marginBottom: '2px' }}>Territorio o Identificación:</label>
-                    <input type="text" value={formTerritory} onChange={e => setFormTerritory(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
+                    <input type="text" value={formTerritory} onChange={e => setFormTerritory(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
                   </div>
 
                   <div style={{ marginBottom: '8px' }}>
                     <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: '#334155', marginBottom: '2px' }}>Casa / Lugar de reunión:</label>
-                    <input type="text" value={formCellLocation} onChange={e => setFormCellLocation(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
+                    <input type="text" value={formCellLocation} onChange={e => setFormCellLocation(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
                   </div>
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                     <div>
                       <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: '#334155', marginBottom: '2px' }}>Día de reunión:</label>
-                      <select value={formCellDay} onChange={e => setFormCellDay(Number(e.target.value))} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
+                      <select value={formCellDay} onChange={e => setFormCellDay(Number(e.target.value))} style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
                         {DAY_NAMES.map((name, idx) => (
                           <option key={idx} value={idx}>{name}</option>
                         ))}
@@ -1124,28 +1183,29 @@ export default function App() {
 
                     <div>
                       <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: '#334155', marginBottom: '2px' }}>Hora de reunión:</label>
-                      <input type="time" value={formCellTime} onChange={e => setFormCellTime(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }} />
+                      <input type="time" value={formCellTime} onChange={e => setFormCellTime(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #cbd5e1' }} />
                     </div>
                   </div>
                 </div>
               )}
 
-              <button type="submit" style={{ width: '100%', background: '#0f172a', color: '#fff', border: 'none', padding: '12px', borderRadius: '8px', fontWeight: 800, fontSize: '0.84rem', cursor: 'pointer' }}>
+              <button type="submit" style={{ width: '100%', background: '#0f172a', color: '#fff', border: 'none', padding: '12px', borderRadius: '10px', fontWeight: 800, fontSize: '0.84rem', cursor: 'pointer' }}>
                 💾 Guardar Configuración
               </button>
             </form>
 
-            <div style={{ background: '#fff', padding: '16px', borderRadius: '12px', border: '1px solid #cbd5e1' }}>
-              <h3 style={{ margin: '0 0 8px', fontSize: '0.9rem', fontWeight: 800 }}>📦 Base de Datos y Respaldos</h3>
-              <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0 0 12px' }}>
+            {/* SECCIÓN RESPALDOS */}
+            <div style={{ background: '#fff', padding: '18px', borderRadius: '18px', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+              <h3 style={{ margin: '0 0 6px', fontSize: '0.92rem', fontWeight: 800 }}>📦 Base de Datos y Respaldos</h3>
+              <p style={{ fontSize: '0.74rem', color: '#64748b', margin: '0 0 14px' }}>
                 Exporta, restaura o importa miembros masivamente desde MySQL.
               </p>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 <button
                   type="button"
                   onClick={() => setShowImportMembersModal(true)}
-                  style={{ width: '100%', background: '#1e3a8a', color: '#fff', border: 'none', padding: '11px', borderRadius: '8px', fontWeight: 800, fontSize: '0.82rem', cursor: 'pointer' }}
+                  style={{ width: '100%', background: '#1e3a8a', color: '#fff', border: 'none', padding: '12px', borderRadius: '10px', fontWeight: 800, fontSize: '0.82rem', cursor: 'pointer' }}
                 >
                   👥 Importar Miembros desde MySQL (JSON)
                 </button>
@@ -1153,12 +1213,12 @@ export default function App() {
                 <button
                   type="button"
                   onClick={openExportBackupModal}
-                  style={{ width: '100%', background: '#047857', color: '#fff', border: 'none', padding: '11px', borderRadius: '8px', fontWeight: 800, fontSize: '0.82rem', cursor: 'pointer' }}
+                  style={{ width: '100%', background: '#047857', color: '#fff', border: 'none', padding: '12px', borderRadius: '10px', fontWeight: 800, fontSize: '0.82rem', cursor: 'pointer' }}
                 >
                   📥 Exportar Respaldo Completo
                 </button>
 
-                <label style={{ width: '100%', background: '#f1f5f9', color: '#0f172a', border: '1px solid #cbd5e1', padding: '10px', borderRadius: '8px', fontWeight: 700, fontSize: '0.78rem', cursor: 'pointer', textAlign: 'center', boxSizing: 'border-box', display: 'block' }}>
+                <label style={{ width: '100%', background: '#f1f5f9', color: '#0f172a', border: '1px solid #cbd5e1', padding: '11px', borderRadius: '10px', fontWeight: 700, fontSize: '0.78rem', cursor: 'pointer', textAlign: 'center', boxSizing: 'border-box', display: 'block' }}>
                   📤 Restaurar desde Archivo .json
                   <input type="file" accept=".json" onChange={handleRestoreFile} style={{ display: 'none' }} />
                 </label>
@@ -1166,7 +1226,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setShowPasteModal(true)}
-                  style={{ width: '100%', background: '#f8fafc', color: '#475569', border: '1px dashed #cbd5e1', padding: '9px', borderRadius: '8px', fontWeight: 700, fontSize: '0.75rem', cursor: 'pointer' }}
+                  style={{ width: '100%', background: '#f8fafc', color: '#475569', border: '1px dashed #cbd5e1', padding: '10px', borderRadius: '10px', fontWeight: 700, fontSize: '0.76rem', cursor: 'pointer' }}
                 >
                   📋 O Restaurar pegando texto JSON
                 </button>
@@ -1176,53 +1236,53 @@ export default function App() {
         )}
       </main>
 
-      {/* MODAL PARA EDITAR HERMANO EXISTENTE */}
+      {/* MODAL PARA EDITAR HERMANO */}
       {editingMember && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 150 }}>
-          <div style={{ background: '#fff', width: '100%', maxWidth: '380px', borderRadius: '16px', padding: '18px', boxShadow: '0 10px 25px rgba(0,0,0,0.25)' }}>
-            <h3 style={{ margin: '0 0 6px', fontSize: '1rem', fontWeight: 800, color: '#0f172a' }}>✏️ Editar Hermano</h3>
-            <p style={{ margin: '0 0 12px', fontSize: '0.72rem', color: '#64748b' }}>Actualiza los datos o roles de este miembro:</p>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 150 }}>
+          <div style={{ background: '#fff', width: '100%', maxWidth: '390px', borderRadius: '20px', padding: '20px', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2)' }}>
+            <h3 style={{ margin: '0 0 6px', fontSize: '1.05rem', fontWeight: 800, color: '#0f172a' }}>✏️ Editar Hermano</h3>
+            <p style={{ margin: '0 0 14px', fontSize: '0.74rem', color: '#64748b' }}>Actualiza los datos o roles de este miembro:</p>
 
-            <form onSubmit={handleSaveEditMember} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <form onSubmit={handleSaveEditMember} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               <div>
-                <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, marginBottom: '2px' }}>Nombre completo *:</label>
+                <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, marginBottom: '4px', color: '#334155' }}>Nombre completo *:</label>
                 <input
                   type="text"
                   required
                   value={editMemberName}
                   onChange={e => setEditMemberName(e.target.value)}
-                  style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
+                  style={{ width: '100%', padding: '9px', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
                 />
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, marginBottom: '2px' }}>Teléfono (opcional):</label>
+                <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, marginBottom: '4px', color: '#334155' }}>Teléfono (opcional):</label>
                 <input
                   type="text"
                   value={editMemberPhone}
                   onChange={e => setEditMemberPhone(e.target.value)}
-                  style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
+                  style={{ width: '100%', padding: '9px', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
                 />
               </div>
 
               {isChurch ? (
-                <div style={{ background: '#eff6ff', padding: '10px', borderRadius: '8px', border: '1px solid #bfdbfe' }}>
-                  <span style={{ display: 'block', fontSize: '0.72rem', fontWeight: 800, color: '#1e40af', marginBottom: '6px' }}>
+                <div style={{ background: '#eff6ff', padding: '12px', borderRadius: '10px', border: '1px solid #bfdbfe' }}>
+                  <span style={{ display: 'block', fontSize: '0.74rem', fontWeight: 800, color: '#1e40af', marginBottom: '6px' }}>
                     🏛️ Capacidades en la IGLESIA:
                   </span>
-                  <div style={{ display: 'flex', gap: '14px', fontSize: '0.76rem' }}>
-                    <label><input type="checkbox" checked={editLeadRole} onChange={e => setEditLeadRole(e.target.checked)} /> Puede dirigir</label>
-                    <label><input type="checkbox" checked={editPreachRole} onChange={e => setEditPreachRole(e.target.checked)} /> Puede predicar</label>
+                  <div style={{ display: 'flex', gap: '14px', fontSize: '0.78rem' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><input type="checkbox" checked={editLeadRole} onChange={e => setEditLeadRole(e.target.checked)} /> Puede dirigir</label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><input type="checkbox" checked={editPreachRole} onChange={e => setEditPreachRole(e.target.checked)} /> Puede predicar</label>
                   </div>
                 </div>
               ) : (
-                <div style={{ background: '#f0fdf4', padding: '10px', borderRadius: '8px', border: '1px solid #bbf7d0' }}>
-                  <span style={{ display: 'block', fontSize: '0.72rem', fontWeight: 800, color: '#166534', marginBottom: '6px' }}>
+                <div style={{ background: '#f0fdf4', padding: '12px', borderRadius: '10px', border: '1px solid #bbf7d0' }}>
+                  <span style={{ display: 'block', fontSize: '0.74rem', fontWeight: 800, color: '#166534', marginBottom: '6px' }}>
                     🏠 Capacidades en la CÉLULA:
                   </span>
-                  <div style={{ display: 'flex', gap: '14px', fontSize: '0.76rem' }}>
-                    <label><input type="checkbox" checked={editLeadRole} onChange={e => setEditLeadRole(e.target.checked)} /> Puede dirigir</label>
-                    <label><input type="checkbox" checked={editPreachRole} onChange={e => setEditPreachRole(e.target.checked)} /> Puede predicar</label>
+                  <div style={{ display: 'flex', gap: '14px', fontSize: '0.78rem' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><input type="checkbox" checked={editLeadRole} onChange={e => setEditLeadRole(e.target.checked)} /> Puede dirigir</label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><input type="checkbox" checked={editPreachRole} onChange={e => setEditPreachRole(e.target.checked)} /> Puede predicar</label>
                   </div>
                 </div>
               )}
@@ -1231,13 +1291,13 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setEditingMember(null)}
-                  style={{ flex: 1, padding: '10px', background: '#e2e8f0', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: 'pointer', fontSize: '0.78rem' }}
+                  style={{ flex: 1, padding: '11px', background: '#e2e8f0', border: 'none', borderRadius: '10px', fontWeight: 700, cursor: 'pointer', fontSize: '0.8rem' }}
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  style={{ flex: 1, padding: '10px', background: '#0f172a', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: 'pointer', fontSize: '0.78rem' }}
+                  style={{ flex: 1, padding: '11px', background: '#0f172a', color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 800, cursor: 'pointer', fontSize: '0.8rem' }}
                 >
                   Guardar Cambios
                 </button>
@@ -1249,11 +1309,11 @@ export default function App() {
 
       {/* MODAL PARA IMPORTAR MIEMBROS DESDE MYSQL */}
       {showImportMembersModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 140 }}>
-          <div style={{ background: '#fff', width: '100%', maxWidth: '420px', borderRadius: '16px', padding: '18px', boxShadow: '0 10px 25px rgba(0,0,0,0.25)' }}>
-            <h3 style={{ margin: '0 0 6px', fontSize: '1rem', fontWeight: 800, color: '#0f172a' }}>👥 Importar Miembros desde MySQL</h3>
-            <p style={{ margin: '0 0 10px', fontSize: '0.72rem', color: '#64748b' }}>
-              Pega aquí el resultado JSON de tu consulta MySQL o sube el archivo exportado:
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 140 }}>
+          <div style={{ background: '#fff', width: '100%', maxWidth: '420px', borderRadius: '20px', padding: '20px', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2)' }}>
+            <h3 style={{ margin: '0 0 6px', fontSize: '1.05rem', fontWeight: 800, color: '#0f172a' }}>👥 Importar Miembros desde MySQL</h3>
+            <p style={{ margin: '0 0 10px', fontSize: '0.74rem', color: '#64748b' }}>
+              Pega el resultado JSON de tu consulta MySQL o sube el archivo exportado:
             </p>
 
             <textarea
@@ -1261,11 +1321,11 @@ export default function App() {
               value={importMembersText}
               onChange={e => setImportMembersText(e.target.value)}
               placeholder='[{"fullName": "Juan Pérez", "phone": "3001234567", "canLead": 1, "canPreach": 1}, ...]'
-              style={{ width: '100%', padding: '8px', fontSize: '0.68rem', fontFamily: 'monospace', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box', marginBottom: '10px' }}
+              style={{ width: '100%', padding: '10px', fontSize: '0.7rem', fontFamily: 'monospace', borderRadius: '10px', border: '1px solid #cbd5e1', boxSizing: 'border-box', marginBottom: '10px' }}
             />
 
             <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
-              <label style={{ flex: 1, background: '#f1f5f9', color: '#0f172a', border: '1px solid #cbd5e1', padding: '9px', borderRadius: '8px', fontWeight: 700, fontSize: '0.72rem', cursor: 'pointer', textAlign: 'center' }}>
+              <label style={{ flex: 1, background: '#f1f5f9', color: '#0f172a', border: '1px solid #cbd5e1', padding: '10px', borderRadius: '10px', fontWeight: 700, fontSize: '0.74rem', cursor: 'pointer', textAlign: 'center' }}>
                 📁 Subir archivo .json
                 <input type="file" accept=".json" onChange={handleImportMembersFile} style={{ display: 'none' }} />
               </label>
@@ -1273,7 +1333,7 @@ export default function App() {
               <button
                 onClick={handleImportMembersSubmit}
                 disabled={!importMembersText.trim()}
-                style={{ flex: 1, background: '#047857', color: '#fff', border: 'none', padding: '9px', borderRadius: '8px', fontWeight: 800, fontSize: '0.72rem', cursor: 'pointer', opacity: importMembersText.trim() ? 1 : 0.6 }}
+                style={{ flex: 1, background: '#047857', color: '#fff', border: 'none', padding: '10px', borderRadius: '10px', fontWeight: 800, fontSize: '0.74rem', cursor: 'pointer', opacity: importMembersText.trim() ? 1 : 0.6 }}
               >
                 Cargar Texto Pegado
               </button>
@@ -1281,7 +1341,7 @@ export default function App() {
 
             <button
               onClick={() => setShowImportMembersModal(false)}
-              style={{ width: '100%', padding: '9px', background: '#e2e8f0', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: 'pointer', fontSize: '0.78rem' }}
+              style={{ width: '100%', padding: '10px', background: '#e2e8f0', border: 'none', borderRadius: '10px', fontWeight: 700, cursor: 'pointer', fontSize: '0.78rem' }}
             >
               Cancelar
             </button>
@@ -1291,31 +1351,31 @@ export default function App() {
 
       {/* MODAL PARA EXPORTAR COPIA */}
       {showExportModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 130 }}>
-          <div style={{ background: '#fff', width: '100%', maxWidth: '400px', borderRadius: '16px', padding: '18px', boxShadow: '0 10px 25px rgba(0,0,0,0.25)' }}>
-            <h3 style={{ margin: '0 0 6px', fontSize: '1rem', fontWeight: 800, color: '#0f172a' }}>📥 Guardar Copia de Seguridad</h3>
-            <p style={{ margin: '0 0 12px', fontSize: '0.73rem', color: '#64748b' }}>
-              Elige cómo deseas guardar tu respaldo:
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 130 }}>
+          <div style={{ background: '#fff', width: '100%', maxWidth: '400px', borderRadius: '20px', padding: '20px', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2)' }}>
+            <h3 style={{ margin: '0 0 6px', fontSize: '1.05rem', fontWeight: 800, color: '#0f172a' }}>📥 Guardar Copia de Seguridad</h3>
+            <p style={{ margin: '0 0 14px', fontSize: '0.74rem', color: '#64748b' }}>
+              Elige cómo deseas respaldar tus datos de {isChurch ? 'la Iglesia' : 'la Célula'}:
             </p>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '14px' }}>
               <button
                 onClick={copyExportToClipboard}
-                style={{ width: '100%', background: '#047857', color: '#fff', border: 'none', padding: '11px', borderRadius: '8px', fontWeight: 800, fontSize: '0.8rem', cursor: 'pointer' }}
+                style={{ width: '100%', background: '#047857', color: '#fff', border: 'none', padding: '12px', borderRadius: '10px', fontWeight: 800, fontSize: '0.82rem', cursor: 'pointer' }}
               >
                 📋 Copiar Copia al Portapapeles
               </button>
 
               <button
                 onClick={shareNativeExport}
-                style={{ width: '100%', background: '#1e3a8a', color: '#fff', border: 'none', padding: '11px', borderRadius: '8px', fontWeight: 800, fontSize: '0.8rem', cursor: 'pointer' }}
+                style={{ width: '100%', background: '#1e3a8a', color: '#fff', border: 'none', padding: '12px', borderRadius: '10px', fontWeight: 800, fontSize: '0.82rem', cursor: 'pointer' }}
               >
                 📲 Compartir en Android (Drive, WhatsApp, etc.)
               </button>
 
               <button
                 onClick={downloadExportFile}
-                style={{ width: '100%', background: '#f1f5f9', color: '#0f172a', border: '1px solid #cbd5e1', padding: '9px', borderRadius: '8px', fontWeight: 700, fontSize: '0.78rem', cursor: 'pointer' }}
+                style={{ width: '100%', background: '#f1f5f9', color: '#0f172a', border: '1px solid #cbd5e1', padding: '10px', borderRadius: '10px', fontWeight: 700, fontSize: '0.78rem', cursor: 'pointer' }}
               >
                 💾 Descargar como Archivo .json
               </button>
@@ -1325,12 +1385,12 @@ export default function App() {
               readOnly
               rows={4}
               value={exportJsonText}
-              style={{ width: '100%', padding: '6px', fontSize: '0.65rem', fontFamily: 'monospace', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', marginBottom: '12px', background: '#f8fafc' }}
+              style={{ width: '100%', padding: '8px', fontSize: '0.66rem', fontFamily: 'monospace', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box', marginBottom: '12px', background: '#f8fafc' }}
             />
 
             <button
               onClick={() => setShowExportModal(false)}
-              style={{ width: '100%', padding: '10px', background: '#e2e8f0', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: 'pointer', fontSize: '0.78rem' }}
+              style={{ width: '100%', padding: '10px', background: '#e2e8f0', border: 'none', borderRadius: '10px', fontWeight: 700, cursor: 'pointer', fontSize: '0.78rem' }}
             >
               Cerrar
             </button>
@@ -1340,22 +1400,22 @@ export default function App() {
 
       {/* Modal para restaurar pegando texto JSON */}
       {showPasteModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 120 }}>
-          <div style={{ background: '#fff', width: '100%', maxWidth: '380px', borderRadius: '16px', padding: '18px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
-            <h3 style={{ margin: '0 0 8px', fontSize: '0.95rem', fontWeight: 800 }}>Pegar Respaldo JSON</h3>
-            <p style={{ margin: '0 0 10px', fontSize: '0.72rem', color: '#64748b' }}>Pega el texto de tu respaldo JSON:</p>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 120 }}>
+          <div style={{ background: '#fff', width: '100%', maxWidth: '380px', borderRadius: '20px', padding: '20px', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2)' }}>
+            <h3 style={{ margin: '0 0 6px', fontSize: '1rem', fontWeight: 800 }}>Pegar Respaldo JSON</h3>
+            <p style={{ margin: '0 0 10px', fontSize: '0.74rem', color: '#64748b' }}>Pega el texto de tu respaldo JSON:</p>
             <textarea
               rows={8}
               value={pastedJsonText}
               onChange={e => setPastedJsonText(e.target.value)}
               placeholder='{"schemaVersion": 3, ...}'
-              style={{ width: '100%', padding: '8px', fontSize: '0.7rem', fontFamily: 'monospace', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box', marginBottom: '12px' }}
+              style={{ width: '100%', padding: '10px', fontSize: '0.7rem', fontFamily: 'monospace', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box', marginBottom: '12px' }}
             />
             <div style={{ display: 'flex', gap: '8px' }}>
-              <button onClick={() => setShowPasteModal(false)} style={{ flex: 1, padding: '10px', background: '#e2e8f0', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: 'pointer' }}>
+              <button onClick={() => setShowPasteModal(false)} style={{ flex: 1, padding: '10px', background: '#e2e8f0', border: 'none', borderRadius: '10px', fontWeight: 700, cursor: 'pointer' }}>
                 Cancelar
               </button>
-              <button onClick={handleRestorePastedText} style={{ flex: 1, padding: '10px', background: '#0f172a', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: 'pointer' }}>
+              <button onClick={handleRestorePastedText} style={{ flex: 1, padding: '10px', background: '#0f172a', color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 700, cursor: 'pointer' }}>
                 Restaurar
               </button>
             </div>
@@ -1365,15 +1425,15 @@ export default function App() {
 
       {/* Modal de Asignación / Edición de Culto */}
       {selectedEvent && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 100 }}>
-          <div style={{ background: '#fff', width: '100%', maxWidth: '420px', maxHeight: '90vh', overflowY: 'auto', borderRadius: '16px', padding: '18px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
-            <h3 style={{ margin: '0 0 4px', fontSize: '1rem', fontWeight: 800 }}>Asignar Responsables</h3>
-            <p style={{ margin: '0 0 12px', fontSize: '0.75rem', color: '#64748b' }}>📅 {formatFriendlyDate(selectedEvent.date)} — <strong>{selectedEvent.title}</strong></p>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 100 }}>
+          <div style={{ background: '#fff', width: '100%', maxWidth: '420px', maxHeight: '90vh', overflowY: 'auto', borderRadius: '20px', padding: '20px', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2)' }}>
+            <h3 style={{ margin: '0 0 4px', fontSize: '1.05rem', fontWeight: 800 }}>Asignar Responsables</h3>
+            <p style={{ margin: '0 0 14px', fontSize: '0.74rem', color: '#64748b' }}>📅 {formatFriendlyDate(selectedEvent.date)} — <strong>{selectedEvent.title}</strong></p>
 
             <form onSubmit={handleSaveEvent} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               <div>
-                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, marginBottom: '4px' }}>👤 Quién Dirige:</label>
-                <select value={modalLeaderId} onChange={e => setModalLeaderId(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
+                <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, marginBottom: '4px' }}>👤 Quién Dirige:</label>
+                <select value={modalLeaderId} onChange={e => setModalLeaderId(e.target.value)} style={{ width: '100%', padding: '9px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
                   <option value="">(Pendiente)</option>
                   {sortedMembers.map(m => (
                     <option key={m.id} value={m.id}>{m.fullName} {memberCanLead(m) ? '✓' : ''}</option>
@@ -1382,8 +1442,8 @@ export default function App() {
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, marginBottom: '4px' }}>📖 Quién Predica:</label>
-                <select value={modalPreacherId} onChange={e => setModalPreacherId(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
+                <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, marginBottom: '4px' }}>📖 Quién Predica:</label>
+                <select value={modalPreacherId} onChange={e => setModalPreacherId(e.target.value)} style={{ width: '100%', padding: '9px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
                   <option value="">(Pendiente)</option>
                   {sortedMembers.map(m => (
                     <option key={m.id} value={m.id}>{m.fullName} {memberCanPreach(m) ? '✓' : ''}</option>
@@ -1392,12 +1452,12 @@ export default function App() {
               </div>
 
               {selectedEvent.type === 'Cena del Señor' && (
-                <div style={{ background: '#fef3c7', padding: '12px', borderRadius: '10px', border: '1px solid #fde68a', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <div style={{ background: '#fef3c7', padding: '12px', borderRadius: '12px', border: '1px solid #fde68a', display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   <span style={{ fontSize: '0.8rem', fontWeight: 800, color: '#92400e' }}>🍞🍷 Asignaciones de la Cena del Señor:</span>
 
                   <div>
                     <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, marginBottom: '4px' }}>🍞 Ora por el Pan:</label>
-                    <select value={modalBreadId} onChange={e => setModalBreadId(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
+                    <select value={modalBreadId} onChange={e => setModalBreadId(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
                       <option value="">(Pendiente)</option>
                       {sortedMembers.map(m => <option key={m.id} value={m.id}>{m.fullName}</option>)}
                     </select>
@@ -1405,7 +1465,7 @@ export default function App() {
 
                   <div>
                     <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, marginBottom: '4px' }}>🍷 Ora por el Vino:</label>
-                    <select value={modalWineId} onChange={e => setModalWineId(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
+                    <select value={modalWineId} onChange={e => setModalWineId(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
                       <option value="">(Pendiente)</option>
                       {sortedMembers.map(m => <option key={m.id} value={m.id}>{m.fullName}</option>)}
                     </select>
@@ -1413,7 +1473,7 @@ export default function App() {
 
                   <div>
                     <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, marginBottom: '4px' }}>🤝 Colaborador 1:</label>
-                    <select value={modalHelper1Id} onChange={e => setModalHelper1Id(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
+                    <select value={modalHelper1Id} onChange={e => setModalHelper1Id(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
                       <option value="">(Pendiente)</option>
                       {sortedMembers.map(m => <option key={m.id} value={m.id}>{m.fullName}</option>)}
                     </select>
@@ -1421,7 +1481,7 @@ export default function App() {
 
                   <div>
                     <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, marginBottom: '4px' }}>🤝 Colaborador 2:</label>
-                    <select value={modalHelper2Id} onChange={e => setModalHelper2Id(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
+                    <select value={modalHelper2Id} onChange={e => setModalHelper2Id(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
                       <option value="">(Pendiente)</option>
                       {sortedMembers.map(m => <option key={m.id} value={m.id}>{m.fullName}</option>)}
                     </select>
@@ -1429,7 +1489,7 @@ export default function App() {
 
                   <div>
                     <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, marginBottom: '4px' }}>🤝 Colaborador 3:</label>
-                    <select value={modalHelper3Id} onChange={e => setModalHelper3Id(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
+                    <select value={modalHelper3Id} onChange={e => setModalHelper3Id(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
                       <option value="">(Pendiente)</option>
                       {sortedMembers.map(m => <option key={m.id} value={m.id}>{m.fullName}</option>)}
                     </select>
@@ -1438,18 +1498,18 @@ export default function App() {
               )}
 
               <div>
-                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, marginBottom: '4px' }}>📍 Lugar:</label>
-                <input type="text" value={modalLocation} onChange={e => setModalLocation(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
+                <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, marginBottom: '4px' }}>📍 Lugar:</label>
+                <input type="text" value={modalLocation} onChange={e => setModalLocation(e.target.value)} style={{ width: '100%', padding: '9px', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, marginBottom: '4px' }}>🕕 Hora:</label>
-                <input type="time" value={modalTime} onChange={e => setModalTime(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }} />
+                <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, marginBottom: '4px' }}>🕕 Hora:</label>
+                <input type="time" value={modalTime} onChange={e => setModalTime(e.target.value)} style={{ width: '100%', padding: '9px', borderRadius: '8px', border: '1px solid #cbd5e1' }} />
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, marginBottom: '4px' }}>Estado:</label>
-                <select value={modalStatus} onChange={e => setModalStatus(e.target.value as any)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
+                <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, marginBottom: '4px' }}>Estado:</label>
+                <select value={modalStatus} onChange={e => setModalStatus(e.target.value as any)} style={{ width: '100%', padding: '9px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
                   <option value="Programado">Programado</option>
                   <option value="Realizado">Realizado</option>
                   <option value="Cancelado">Cancelado</option>
@@ -1457,15 +1517,15 @@ export default function App() {
               </div>
 
               <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
-                <button type="button" onClick={() => setSelectedEvent(null)} style={{ flex: 1, background: '#e2e8f0', color: '#1e293b', border: 'none', padding: '10px', borderRadius: '8px', fontWeight: 700, cursor: 'pointer' }}>
+                <button type="button" onClick={() => setSelectedEvent(null)} style={{ flex: 1, background: '#e2e8f0', color: '#1e293b', border: 'none', padding: '10px', borderRadius: '10px', fontWeight: 700, cursor: 'pointer' }}>
                   Cerrar
                 </button>
-                <button type="submit" style={{ flex: 1, background: '#0f172a', color: '#fff', border: 'none', padding: '10px', borderRadius: '8px', fontWeight: 700, cursor: 'pointer' }}>
+                <button type="submit" style={{ flex: 1, background: '#0f172a', color: '#fff', border: 'none', padding: '10px', borderRadius: '10px', fontWeight: 800, cursor: 'pointer' }}>
                   Guardar
                 </button>
               </div>
 
-              <button type="button" onClick={() => handleDeleteEvent(selectedEvent.id)} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '0.75rem', marginTop: '6px', cursor: 'pointer', textAlign: 'center' }}>
+              <button type="button" onClick={() => handleDeleteEvent(selectedEvent.id)} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '0.74rem', marginTop: '6px', cursor: 'pointer', textAlign: 'center' }}>
                 Eliminar este culto
               </button>
             </form>
@@ -1473,8 +1533,8 @@ export default function App() {
         </div>
       )}
 
-      {/* Navegación Inferior */}
-      <nav style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: '#ffffff', borderTop: '1px solid #cbd5e1', display: 'flex', justifyContent: 'space-around', padding: '8px 0', maxWidth: '480px', margin: '0 auto', zIndex: 50 }}>
+      {/* 3. BARRA DE NAVEGACIÓN INFERIOR ELEGANTE */}
+      <nav style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: '#ffffff', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-around', padding: '8px 0', maxWidth: '480px', margin: '0 auto', zIndex: 50, boxShadow: '0 -2px 10px rgba(0,0,0,0.03)' }}>
         {[
           { id: 'calendario', label: 'Calendario', icon: '📅' },
           { id: 'inicio', label: 'Inicio', icon: '🏠' },
@@ -1491,12 +1551,13 @@ export default function App() {
               flexDirection: 'column',
               alignItems: 'center',
               color: tab === item.id ? '#0f172a' : '#94a3b8',
-              fontWeight: tab === item.id ? 800 : 500,
+              fontWeight: tab === item.id ? 800 : 600,
               fontSize: '0.72rem',
-              cursor: 'pointer'
+              cursor: 'pointer',
+              padding: '4px 12px'
             }}
           >
-            <span style={{ fontSize: '1.2rem', marginBottom: '2px' }}>{item.icon}</span>
+            <span style={{ fontSize: '1.25rem', marginBottom: '2px' }}>{item.icon}</span>
             {item.label}
           </button>
         ))}
