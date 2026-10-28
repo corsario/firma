@@ -29,15 +29,11 @@ export default function App() {
   const [formCellDay, setFormCellDay] = useState(3);
   const [formCellTime, setFormCellTime] = useState('18:00');
 
-  // Modales de Respaldo e Importación
-  const [showExportModal, setShowExportModal] = useState(false);
-  const [exportJsonText, setExportJsonText] = useState('');
-  const [showPasteModal, setShowPasteModal] = useState(false);
-  const [pastedJsonText, setPastedJsonText] = useState('');
-  const [showImportMembersModal, setShowImportMembersModal] = useState(false);
-  const [importMembersText, setImportMembersText] = useState('');
+  // Sistema de respaldo directo en pantalla
+  const [generatedBackupText, setGeneratedBackupText] = useState('');
+  const [pastedRestoreText, setPastedRestoreText] = useState('');
 
-  // Modal de Finanzas (Registrar movimiento)
+  // Modal de Finanzas
   const [showFinanceModal, setShowFinanceModal] = useState(false);
   const [finType, setFinType] = useState<TransactionType>('ingreso');
   const [finAmount, setFinAmount] = useState('');
@@ -76,29 +72,38 @@ export default function App() {
   const [notice, setNotice] = useState<string | null>(null);
 
   const loadAll = async () => {
-    let s = await db.settings.get('cell_settings');
-    if (!s) {
-      s = DEFAULT_SETTINGS;
-      await db.settings.put(DEFAULT_SETTINGS);
+    try {
+      let s = await db.settings.get('cell_settings');
+      if (!s) {
+        s = DEFAULT_SETTINGS;
+        await db.settings.put(DEFAULT_SETTINGS);
+      }
+      setSettings(s);
+      setFormEntityType(s.entityType || 'iglesia');
+      setFormChurchName(s.churchName || 'LEHV-La catedral del Avivamiento');
+      setFormChurchLocation(s.churchLocation || DEFAULT_SETTINGS.churchLocation);
+      setFormCellName(s.cellName || DEFAULT_SETTINGS.cellName);
+      setFormTerritory(s.territory || DEFAULT_SETTINGS.territory);
+      setFormCellLocation(s.cellLocation || DEFAULT_SETTINGS.cellLocation);
+      setFormCellDay(s.cellDay !== undefined ? s.cellDay : 3);
+      setFormCellTime(s.cellTime || DEFAULT_SETTINGS.cellTime);
+
+      const m = await db.members.toArray();
+      setMembers(m);
+
+      const e = await db.events.orderBy('date').toArray();
+      setEvents(e);
+
+      let f: FinancialRecord[] = [];
+      try {
+        if (db.finances) {
+          f = await db.finances.orderBy('date').toArray();
+        }
+      } catch {}
+      setFinances(f);
+    } catch (err) {
+      console.error(err);
     }
-    setSettings(s);
-    setFormEntityType(s.entityType || 'iglesia');
-    setFormChurchName(s.churchName || 'LEHV-La catedral del Avivamiento');
-    setFormChurchLocation(s.churchLocation || DEFAULT_SETTINGS.churchLocation);
-    setFormCellName(s.cellName || DEFAULT_SETTINGS.cellName);
-    setFormTerritory(s.territory || DEFAULT_SETTINGS.territory);
-    setFormCellLocation(s.cellLocation || DEFAULT_SETTINGS.cellLocation);
-    setFormCellDay(s.cellDay !== undefined ? s.cellDay : 3);
-    setFormCellTime(s.cellTime || DEFAULT_SETTINGS.cellTime);
-
-    const m = await db.members.toArray();
-    setMembers(m);
-
-    const e = await db.events.orderBy('date').toArray();
-    setEvents(e);
-
-    const f = await db.finances.orderBy('date').toArray();
-    setFinances(f);
   };
 
   useEffect(() => {
@@ -112,7 +117,6 @@ export default function App() {
 
   const isChurch = settings.entityType === 'iglesia';
 
-  // Categorías según ámbito
   const churchIncomeCategories = [
     'Diezmo',
     'Ofrenda de culto general',
@@ -222,12 +226,155 @@ export default function App() {
     showMsg(`¡Configuración de ${formEntityType === 'iglesia' ? 'la Iglesia' : 'la Célula'} guardada!`);
   };
 
-  // 1. GESTIÓN FINANCIERA (GUARDAR MOVIMIENTO)
+  // 1. GENERAR Y COPIAR RESPALDO VISIBLE (100% FUNCIONAL EN ANDROID)
+  const handleGenerateBackupDirect = async () => {
+    try {
+      const data = {
+        schemaVersion: 4,
+        exportedAt: new Date().toISOString(),
+        settings,
+        members,
+        events,
+        finances
+      };
+      const jsonStr = JSON.stringify(data, null, 2);
+      setGeneratedBackupText(jsonStr);
+
+      // Copiar automáticamente al portapapeles
+      let copied = false;
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(jsonStr);
+          copied = true;
+        }
+      } catch {}
+
+      if (!copied) {
+        try {
+          const ta = document.getElementById('directBackupArea') as HTMLTextAreaElement;
+          if (ta) {
+            ta.value = jsonStr;
+            ta.focus();
+            ta.select();
+            document.execCommand('copy');
+            copied = true;
+          }
+        } catch {}
+      }
+
+      showMsg(copied ? '✅ ¡Copia generada y copiada al portapapeles!' : '✅ ¡Copia generada en el cuadro inferior!');
+    } catch {
+      showMsg('Error al generar la copia de seguridad.');
+    }
+  };
+
+  const handleCopyGeneratedBackup = () => {
+    if (!generatedBackupText) return;
+    const ta = document.getElementById('directBackupArea') as HTMLTextAreaElement;
+    if (ta) {
+      ta.focus();
+      ta.select();
+      document.execCommand('copy');
+      showMsg('¡Texto de respaldo copiado!');
+    }
+  };
+
+  const handleShareBackupWhatsApp = () => {
+    if (!generatedBackupText) {
+      showMsg('Primero pulsa "Generar Copia de Respaldo".');
+      return;
+    }
+    const header = `*COPIA DE SEGURIDAD ${settings.entityType === 'iglesia' ? settings.churchName.toUpperCase() : settings.cellName.toUpperCase()}*\n`;
+    const fullText = header + generatedBackupText;
+    window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(fullText)}`, '_blank');
+  };
+
+  const handleDownloadBackupFile = () => {
+    if (!generatedBackupText) {
+      showMsg('Primero pulsa "Generar Copia de Respaldo".');
+      return;
+    }
+    try {
+      const blob = new Blob([generatedBackupText], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Copia_${settings.entityType === 'iglesia' ? 'Iglesia' : 'Celula'}_${new Date().toISOString().substring(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showMsg('Archivo descargado.');
+    } catch {
+      showMsg('Descarga bloqueada en este móvil. Usa "Copiar" o "WhatsApp".');
+    }
+  };
+
+  // 2. RESTAURAR RESPALDO DESDE TEXTO DIRECTO (INFALIBLE)
+  const handleRestoreFromTextDirect = async () => {
+    if (!pastedRestoreText.trim()) {
+      showMsg('Pega el código de respaldo en el cuadro primero.');
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(pastedRestoreText.trim());
+      if (!parsed || typeof parsed !== 'object') {
+        showMsg('El texto ingresado no es un JSON válido.');
+        return;
+      }
+
+      if (window.confirm('¿Deseas restaurar esta copia? Reemplazará todos los datos actuales de la aplicación.')) {
+        await db.transaction('rw', [db.settings, db.members, db.events, db.finances], async () => {
+          if (parsed.settings) {
+            await db.settings.clear();
+            await db.settings.put(parsed.settings);
+          }
+          if (Array.isArray(parsed.members)) {
+            await db.members.clear();
+            if (parsed.members.length > 0) await db.members.bulkAdd(parsed.members);
+          }
+          if (Array.isArray(parsed.events)) {
+            await db.events.clear();
+            if (parsed.events.length > 0) await db.events.bulkAdd(parsed.events);
+          }
+          if (Array.isArray(parsed.finances)) {
+            await db.finances.clear();
+            if (parsed.finances.length > 0) await db.finances.bulkAdd(parsed.finances);
+          }
+        });
+
+        await loadAll();
+        setPastedRestoreText('');
+        showMsg('✅ ¡Todos los datos se restauraron con éxito!');
+      }
+    } catch {
+      showMsg('Error al leer el código. Asegúrate de pegarlo completo.');
+    }
+  };
+
+  const handleRestoreFileDirect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const text = reader.result as string;
+        setPastedRestoreText(text);
+        showMsg('Archivo cargado en el cuadro. Pulsa "Restaurar".');
+      } catch {
+        showMsg('Error al leer el archivo.');
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  // Finanzas
   const openNewFinanceModal = () => {
     setFinAmount('');
     setFinDate(new Date().toISOString().substring(0, 10));
     setFinType('ingreso');
-    setFinCategory(isChurch ? 'Diezmo' : 'Ofrenda de reunión de célula');
+    setFinCategory(isChurch ? churchIncomeCategories[0] : cellIncomeCategories[0]);
     setFinMemberId('');
     setFinNotes('');
     setShowFinanceModal(true);
@@ -237,7 +384,7 @@ export default function App() {
     e.preventDefault();
     const amountNum = parseFloat(finAmount);
     if (isNaN(amountNum) || amountNum <= 0) {
-      showMsg('Por favor ingresa un monto válido mayor a cero.');
+      showMsg('Ingresa un monto válido mayor a cero.');
       return;
     }
 
@@ -257,24 +404,23 @@ export default function App() {
 
     setShowFinanceModal(false);
     await loadAll();
-    showMsg(`¡${finType === 'ingreso' ? 'Entrada' : 'Salida'} de ${formatCurrency(amountNum)} registrada con éxito!`);
+    showMsg(`¡${finType === 'ingreso' ? 'Entrada' : 'Salida'} de ${formatCurrency(amountNum)} guardada!`);
   };
 
   const handleDeleteFinanceRecord = async (id: string) => {
-    if (window.confirm('¿Deseas eliminar este registro de finanzas?')) {
+    if (window.confirm('¿Deseas eliminar este movimiento?')) {
       await db.finances.delete(id);
       await loadAll();
       showMsg('Movimiento eliminado.');
     }
   };
 
-  // Reporte Financiero para WhatsApp
   const handleShareFinanceWhatsApp = () => {
     const ym = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
     const monthFinances = finances.filter(f => f.date.startsWith(ym) && f.scope === settings.entityType);
 
     if (monthFinances.length === 0) {
-      showMsg('No hay movimientos financieros en este mes para generar informe.');
+      showMsg('No hay movimientos en este mes.');
       return;
     }
 
@@ -282,224 +428,24 @@ export default function App() {
     const totalEgresos = monthFinances.filter(f => f.type === 'egreso').reduce((acc, curr) => acc + curr.amount, 0);
     const balanceNeto = totalIngresos - totalEgresos;
 
-    // Desglose por categorías
-    const catMap: Record<string, number> = {};
-    monthFinances.forEach(f => {
-      const prefix = f.type === 'ingreso' ? '• ' : '• ';
-      const key = `${prefix}${f.category}`;
-      catMap[key] = (catMap[key] || 0) + f.amount;
-    });
-
     let text = `*${isChurch ? settings.churchName.toUpperCase() : settings.cellName.toUpperCase()}*\n`;
     text += isChurch ? `📍 ${settings.churchLocation}\n` : `${settings.territory} • ${settings.cellLocation}\n`;
     text += `*INFORME FINANCIERO — ${MONTH_NAMES[currentMonth].toUpperCase()} ${currentYear}*\n\n`;
 
     text += `📈 *TOTAL INGRESOS:* ${formatCurrency(totalIngresos)}\n`;
-    const ingresosItems = Object.entries(catMap).filter(([k]) => k.startsWith('• ') && monthFinances.some(f => f.category === k.replace('• ', '') && f.type === 'ingreso'));
-    ingresosItems.forEach(([k, v]) => { text += `  ${k}: ${formatCurrency(v)}\n`; });
+    monthFinances.filter(f => f.type === 'ingreso').forEach(f => {
+      text += `  • ${f.category}: ${formatCurrency(f.amount)}\n`;
+    });
 
     text += `\n📉 *TOTAL EGRESOS:* ${formatCurrency(totalEgresos)}\n`;
-    const egresosItems = Object.entries(catMap).filter(([k]) => k.startsWith('• ') && monthFinances.some(f => f.category === k.replace('• ', '') && f.type === 'egreso'));
-    egresosItems.forEach(([k, v]) => { text += `  ${k}: ${formatCurrency(v)}\n`; });
+    monthFinances.filter(f => f.type === 'egreso').forEach(f => {
+      text += `  • ${f.category}: ${formatCurrency(f.amount)}\n`;
+    });
 
     text += `\n────────────────\n`;
-    text += `💰 *SALDO EN CAJA:* ${formatCurrency(balanceNeto)}\n`;
+    text += `💰 *SALDO DISPONIBLE EN CAJA:* ${formatCurrency(balanceNeto)}\n`;
 
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
-  };
-
-  // Importar desde MySQL
-  const processImportMembersList = async (items: any[]) => {
-    if (!Array.isArray(items) || items.length === 0) {
-      showMsg('No se encontraron registros válidos.');
-      return;
-    }
-
-    const nowIso = new Date().toISOString();
-    const existingNames = new Set(members.map(m => m.fullName.trim().toLowerCase()));
-    const toInsert: Member[] = [];
-    let skippedCount = 0;
-
-    for (const raw of items) {
-      const name = (raw.fullName || raw.nombre || raw.nombres || raw.name || raw.nombre_completo || '').toString().trim();
-      if (!name) continue;
-
-      if (existingNames.has(name.toLowerCase())) {
-        skippedCount++;
-        continue;
-      }
-
-      const phone = (raw.phone || raw.telefono || raw.celular || raw.tel || '').toString().trim() || undefined;
-      const isTruthy = (val: any) => val === true || val === 1 || val === '1' || val === 'true' || val === 'si' || val === 's';
-
-      toInsert.push({
-        id: 'm_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
-        fullName: name,
-        phone,
-        canLeadCell: isTruthy(raw.canLeadCell || raw.dirige_celula || raw.dirige),
-        canPreachCell: isTruthy(raw.canPreachCell || raw.predica_celula || raw.predica),
-        canLeadChurch: isTruthy(raw.canLeadChurch || raw.dirige_iglesia || raw.dirige),
-        canPreachChurch: isTruthy(raw.canPreachChurch || raw.predica_iglesia || raw.predica),
-        isActive: true,
-        createdAt: nowIso,
-        updatedAt: nowIso
-      });
-      existingNames.add(name.toLowerCase());
-    }
-
-    if (toInsert.length > 0) {
-      await db.members.bulkAdd(toInsert);
-      await loadAll();
-      showMsg(`¡${toInsert.length} hermanos importados! ${skippedCount > 0 ? `(${skippedCount} ya existían)` : ''}`);
-      setShowImportMembersModal(false);
-      setImportMembersText('');
-    } else {
-      showMsg('Todos los hermanos de la lista ya estaban registrados.');
-    }
-  };
-
-  const handleImportMembersSubmit = () => {
-    try {
-      const parsed = JSON.parse(importMembersText);
-      const list = Array.isArray(parsed) ? parsed : (parsed.members || parsed.data || []);
-      processImportMembersList(list);
-    } catch {
-      showMsg('El texto ingresado no es un JSON válido.');
-    }
-  };
-
-  const handleImportMembersFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async () => {
-      try {
-        const parsed = JSON.parse(reader.result as string);
-        const list = Array.isArray(parsed) ? parsed : (parsed.members || parsed.data || []);
-        await processImportMembersList(list);
-      } catch {
-        showMsg('Error al leer el archivo.');
-      }
-    };
-    reader.readAsText(file);
-  };
-
-  // Respaldos (incluye miembros, cultos y finanzas)
-  const openExportBackupModal = () => {
-    const data = {
-      schemaVersion: 4,
-      exportedAt: new Date().toISOString(),
-      settings,
-      members,
-      events,
-      finances
-    };
-    setExportJsonText(JSON.stringify(data, null, 2));
-    setShowExportModal(true);
-  };
-
-  const copyExportToClipboard = async () => {
-    try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(exportJsonText);
-        showMsg('¡Copia copiada al portapapeles!');
-        return;
-      }
-    } catch {}
-
-    const textArea = document.createElement('textarea');
-    textArea.value = exportJsonText;
-    textArea.style.position = 'fixed';
-    textArea.style.left = '-999999px';
-    document.body.appendChild(textArea);
-    textArea.focus();
-    textArea.select();
-    document.execCommand('copy');
-    document.body.removeChild(textArea);
-    showMsg('¡Copia copiada al portapapeles!');
-  };
-
-  const shareNativeExport = async () => {
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: `Copia_${isChurch ? 'Iglesia' : 'Celula'}.json`,
-          text: exportJsonText
-        });
-        showMsg('Copia compartida con éxito.');
-      } catch (e: any) {
-        if (e.name !== 'AbortError') copyExportToClipboard();
-      }
-    } else {
-      copyExportToClipboard();
-    }
-  };
-
-  const downloadExportFile = () => {
-    try {
-      const blob = new Blob([exportJsonText], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `Copia_${new Date().toISOString().substring(0, 10)}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      showMsg('Archivo descargado.');
-    } catch {
-      copyExportToClipboard();
-    }
-  };
-
-  const processRestoreObject = async (parsed: any) => {
-    if (!parsed.settings || !Array.isArray(parsed.members) || !Array.isArray(parsed.events)) {
-      showMsg('El archivo no contiene un formato válido.');
-      return;
-    }
-    if (window.confirm('¿Deseas restaurar esta copia? Reemplazará los datos actuales.')) {
-      await db.transaction('rw', [db.settings, db.members, db.events, db.finances], async () => {
-        await db.settings.clear();
-        await db.members.clear();
-        await db.events.clear();
-        await db.finances.clear();
-
-        await db.settings.put(parsed.settings);
-        if (parsed.members.length > 0) await db.members.bulkAdd(parsed.members);
-        if (parsed.events.length > 0) await db.events.bulkAdd(parsed.events);
-        if (parsed.finances && Array.isArray(parsed.finances) && parsed.finances.length > 0) {
-          await db.finances.bulkAdd(parsed.finances);
-        }
-      });
-      await loadAll();
-      showMsg('¡Copia restaurada con éxito!');
-      setShowPasteModal(false);
-      setPastedJsonText('');
-    }
-  };
-
-  const handleRestoreFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async () => {
-      try {
-        const parsed = JSON.parse(reader.result as string);
-        await processRestoreObject(parsed);
-      } catch {
-        showMsg('Error al leer el archivo.');
-      }
-    };
-    reader.readAsText(file);
-  };
-
-  const handleRestorePastedText = async () => {
-    try {
-      const parsed = JSON.parse(pastedJsonText);
-      await processRestoreObject(parsed);
-    } catch {
-      showMsg('El texto ingresado no es un JSON válido.');
-    }
   };
 
   // UN SOLO BOTÓN: Generar y Asignar Cultos
@@ -703,7 +649,6 @@ export default function App() {
     showMsg(`⚡ ¡Mes generado y hermanos asignados para ${isChurch ? 'la Iglesia' : 'la Célula'}!`);
   };
 
-  // Edición de culto
   const openEditEvent = (ev: CellEvent) => {
     setSelectedEvent(ev);
     setModalLeaderId(ev.leaderId || '');
@@ -806,7 +751,6 @@ export default function App() {
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
   };
 
-  // Registrar nuevo miembro
   const handleAddMember = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMemberName.trim()) return;
@@ -833,7 +777,6 @@ export default function App() {
     showMsg(`Hermano agregado para ${isChurch ? 'la Iglesia' : 'la Célula'}.`);
   };
 
-  // Editar miembro existente
   const openEditMember = (m: Member) => {
     setEditingMember(m);
     setEditMemberName(m.fullName);
@@ -880,7 +823,7 @@ export default function App() {
     return isChurch ? e.type !== 'Servicio de célula' : e.type === 'Servicio de célula';
   });
 
-  // Cálculos de Finanzas del Mes
+  // Balance Financiero
   const currentMonthFinances = finances.filter(f =>
     f.date.startsWith(ymCurrent) && f.scope === settings.entityType
   );
@@ -902,7 +845,7 @@ export default function App() {
   return (
     <div style={{ maxWidth: '480px', margin: '0 auto', minHeight: '100vh', background: '#f8fafc', paddingBottom: '80px', display: 'flex', flexDirection: 'column', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
       
-      {/* 1. ENCABEZADO ELEGANTE */}
+      {/* 1. ENCABEZADO */}
       <header style={{ background: 'linear-gradient(135deg, #0f172a, #172554)', color: '#ffffff', padding: '16px 18px', borderBottom: '3px solid #b45309', boxShadow: '0 4px 12px rgba(15, 23, 42, 0.15)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
@@ -916,14 +859,14 @@ export default function App() {
               {isChurch ? settings.churchLocation : `${settings.territory} • ${settings.cellLocation}`}
             </p>
           </div>
-          <span style={{ fontSize: '0.68rem', background: isChurch ? 'rgba(30, 64, 175, 0.8)' : 'rgba(22, 101, 52, 0.8)', border: '1px solid rgba(255,255,255,0.2)', padding: '5px 10px', borderRadius: '20px', color: '#fff', fontWeight: 800, letterSpacing: '0.05em' }}>
+          <span style={{ fontSize: '0.68rem', background: isChurch ? 'rgba(30, 64, 175, 0.8)' : 'rgba(22, 101, 52, 0.8)', border: '1px solid rgba(255,255,255,0.2)', padding: '5px 10px', borderRadius: '20px', color: '#fff', fontWeight: 800 }}>
             {isChurch ? 'IGLESIA' : 'CÉLULA'}
           </span>
         </div>
       </header>
 
       {notice && (
-        <div style={{ background: '#0f172a', color: '#f8fafc', padding: '10px 16px', fontSize: '0.82rem', textAlign: 'center', fontWeight: 700, borderBottom: '2px solid #f59e0b', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
+        <div style={{ background: '#0f172a', color: '#f8fafc', padding: '10px 16px', fontSize: '0.82rem', textAlign: 'center', fontWeight: 700, borderBottom: '2px solid #f59e0b' }}>
           {notice}
         </div>
       )}
@@ -935,14 +878,14 @@ export default function App() {
         {tab === 'calendario' && (
           <div>
             <div style={{ background: '#ffffff', padding: '12px 16px', borderRadius: '16px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
-              <button onClick={() => { if (currentMonth === 0) { setCurrentMonth(11); setCurrentYear(y => y - 1); } else { setCurrentMonth(m => m - 1); } }} style={{ background: '#f1f5f9', border: 'none', width: '36px', height: '36px', borderRadius: '10px', cursor: 'pointer', fontWeight: 800, color: '#334155' }}>◀</button>
+              <button onClick={() => { if (currentMonth === 0) { setCurrentMonth(11); setCurrentYear(y => y - 1); } else { setCurrentMonth(m => m - 1); } }} style={{ background: '#f1f5f9', border: 'none', width: '36px', height: '36px', borderRadius: '10px', cursor: 'pointer', fontWeight: 800 }}>◀</button>
               <div style={{ textAlign: 'center' }}>
-                <span style={{ fontSize: '1.05rem', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em' }}>{MONTH_NAMES[currentMonth]} {currentYear}</span>
+                <span style={{ fontSize: '1.05rem', fontWeight: 800, color: '#0f172a' }}>{MONTH_NAMES[currentMonth]} {currentYear}</span>
                 <span style={{ display: 'block', fontSize: '0.72rem', color: '#64748b', fontWeight: 600, marginTop: '2px' }}>
                   {visibleEvents.length} culto(s) en {isChurch ? 'la Iglesia' : 'la Célula'}
                 </span>
               </div>
-              <button onClick={() => { if (currentMonth === 11) { setCurrentMonth(0); setCurrentYear(y => y + 1); } else { setCurrentMonth(m => m + 1); } }} style={{ background: '#f1f5f9', border: 'none', width: '36px', height: '36px', borderRadius: '10px', cursor: 'pointer', fontWeight: 800, color: '#334155' }}>▶</button>
+              <button onClick={() => { if (currentMonth === 11) { setCurrentMonth(0); setCurrentYear(y => y + 1); } else { setCurrentMonth(m => m + 1); } }} style={{ background: '#f1f5f9', border: 'none', width: '36px', height: '36px', borderRadius: '10px', cursor: 'pointer', fontWeight: 800 }}>▶</button>
             </div>
 
             <button
@@ -961,8 +904,7 @@ export default function App() {
                 display: 'flex',
                 justifyContent: 'center',
                 alignItems: 'center',
-                gap: '8px',
-                boxShadow: isChurch ? '0 4px 12px rgba(30, 58, 138, 0.25)' : '0 4px 12px rgba(6, 95, 70, 0.25)'
+                gap: '8px'
               }}
             >
               <span>⚡</span>
@@ -985,8 +927,7 @@ export default function App() {
                 display: 'flex',
                 justifyContent: 'center',
                 alignItems: 'center',
-                gap: '8px',
-                boxShadow: '0 4px 10px rgba(5, 150, 105, 0.2)'
+                gap: '8px'
               }}
             >
               <span>📲</span>
@@ -996,7 +937,6 @@ export default function App() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               {visibleEvents.length === 0 ? (
                 <div style={{ background: '#fff', padding: '32px 20px', borderRadius: '18px', textAlign: 'center', color: '#64748b', fontSize: '0.85rem', border: '1px dashed #cbd5e1' }}>
-                  <div style={{ fontSize: '2rem', marginBottom: '8px' }}>📅</div>
                   No hay cultos programados para este mes.<br/>
                   Pulsa arriba <strong>"⚡ Generar y Asignar Mes"</strong> para crearlos y sortearlos en 1 segundo.
                 </div>
@@ -1077,10 +1017,9 @@ export default function App() {
           </div>
         )}
 
-        {/* 2. FINANZAS (PROPUESTA 1: DIFERENCIADA IGLESIA VS CÉLULA) */}
+        {/* 2. FINANZAS */}
         {tab === 'finanzas' && (
           <div>
-            {/* Navegación del mes */}
             <div style={{ background: '#ffffff', padding: '12px 16px', borderRadius: '16px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
               <button onClick={() => { if (currentMonth === 0) { setCurrentMonth(11); setCurrentYear(y => y - 1); } else { setCurrentMonth(m => m - 1); } }} style={{ background: '#f1f5f9', border: 'none', width: '36px', height: '36px', borderRadius: '10px', cursor: 'pointer', fontWeight: 800 }}>◀</button>
               <div style={{ textAlign: 'center' }}>
@@ -1092,7 +1031,6 @@ export default function App() {
               <button onClick={() => { if (currentMonth === 11) { setCurrentMonth(0); setCurrentYear(y => y + 1); } else { setCurrentMonth(m => m + 1); } }} style={{ background: '#f1f5f9', border: 'none', width: '36px', height: '36px', borderRadius: '10px', cursor: 'pointer', fontWeight: 800 }}>▶</button>
             </div>
 
-            {/* Tarjetas de Balance Superior */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
               <div style={{ background: '#ffffff', padding: '14px', borderRadius: '14px', border: '1px solid #bbf7d0', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
                 <span style={{ fontSize: '0.72rem', color: '#166534', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -1113,55 +1051,32 @@ export default function App() {
               </div>
             </div>
 
-            {/* Saldo en Caja Disponible */}
-            <div style={{ background: 'linear-gradient(135deg, #0f172a, #1e3a8a)', color: '#fff', padding: '16px', borderRadius: '16px', marginBottom: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: '0 4px 10px rgba(15, 23, 42, 0.15)' }}>
+            <div style={{ background: 'linear-gradient(135deg, #0f172a, #1e3a8a)', color: '#fff', padding: '16px', borderRadius: '16px', marginBottom: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
-                <span style={{ fontSize: '0.72rem', color: '#f59e0b', textTransform: 'uppercase', fontWeight: 800 }}>Saldo Neto en Caja</span>
-                <div style={{ fontSize: '1.45rem', fontWeight: 800, letterSpacing: '-0.02em', marginTop: '2px' }}>
+                <span style={{ fontSize: '0.72rem', color: '#f59e0b', textTransform: 'uppercase', fontWeight: 800 }}>Saldo Disponible en Caja</span>
+                <div style={{ fontSize: '1.45rem', fontWeight: 800, marginTop: '2px' }}>
                   {formatCurrency(balanceNetoMes)}
                 </div>
               </div>
               <div style={{ fontSize: '2rem' }}>💰</div>
             </div>
 
-            {/* Botones de Acción */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '14px' }}>
               <button
                 onClick={openNewFinanceModal}
-                style={{
-                  background: isChurch ? '#1e3a8a' : '#047857',
-                  color: '#fff',
-                  border: 'none',
-                  padding: '12px',
-                  borderRadius: '12px',
-                  fontSize: '0.8rem',
-                  fontWeight: 800,
-                  cursor: 'pointer',
-                  boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
-                }}
+                style={{ background: isChurch ? '#1e3a8a' : '#047857', color: '#fff', border: 'none', padding: '12px', borderRadius: '12px', fontSize: '0.8rem', fontWeight: 800, cursor: 'pointer' }}
               >
                 + Registrar Movimiento
               </button>
 
               <button
                 onClick={handleShareFinanceWhatsApp}
-                style={{
-                  background: '#059669',
-                  color: '#fff',
-                  border: 'none',
-                  padding: '12px',
-                  borderRadius: '12px',
-                  fontSize: '0.8rem',
-                  fontWeight: 800,
-                  cursor: 'pointer',
-                  boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
-                }}
+                style={{ background: '#059669', color: '#fff', border: 'none', padding: '12px', borderRadius: '12px', fontSize: '0.8rem', fontWeight: 800, cursor: 'pointer' }}
               >
                 📲 Enviar WhatsApp
               </button>
             </div>
 
-            {/* Filtro Rápido */}
             <div style={{ display: 'flex', gap: '6px', marginBottom: '12px' }}>
               {[
                 { id: 'todos', label: 'Todos' },
@@ -1188,12 +1103,11 @@ export default function App() {
               ))}
             </div>
 
-            {/* Lista de Movimientos */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {filteredFinancesList.length === 0 ? (
                 <div style={{ background: '#fff', padding: '30px 20px', borderRadius: '16px', textAlign: 'center', color: '#64748b', fontSize: '0.82rem', border: '1px dashed #cbd5e1' }}>
                   No hay movimientos registrados en este mes.<br/>
-                  Pulsa <strong>"+ Registrar Movimiento"</strong> para ingresar ofrendas, diezmos o gastos.
+                  Pulsa <strong>"+ Registrar Movimiento"</strong>.
                 </div>
               ) : (
                 filteredFinancesList.map(rec => {
@@ -1210,8 +1124,7 @@ export default function App() {
                         border: isIngreso ? '1px solid #bbf7d0' : '1px solid #fecaca',
                         display: 'flex',
                         justifyContent: 'space-between',
-                        alignItems: 'center',
-                        boxShadow: '0 1px 2px rgba(0,0,0,0.02)'
+                        alignItems: 'center'
                       }}
                     >
                       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -1269,11 +1182,11 @@ export default function App() {
         {/* 3. INICIO */}
         {tab === 'inicio' && (
           <div>
-            <div style={{ background: 'linear-gradient(135deg, #0f172a, #1e3a8a)', color: '#fff', padding: '22px 18px', borderRadius: '20px', marginBottom: '16px', border: '1px solid #b45309', boxShadow: '0 8px 16px rgba(15, 23, 42, 0.15)' }}>
-              <span style={{ fontSize: '0.7rem', color: '#f59e0b', textTransform: 'uppercase', fontWeight: 800, letterSpacing: '0.05em' }}>
+            <div style={{ background: 'linear-gradient(135deg, #0f172a, #1e3a8a)', color: '#fff', padding: '22px 18px', borderRadius: '20px', marginBottom: '16px', border: '1px solid #b45309' }}>
+              <span style={{ fontSize: '0.7rem', color: '#f59e0b', textTransform: 'uppercase', fontWeight: 800 }}>
                 {isChurch ? '🏛️ Iglesia Activa' : '🏠 Célula Activa'}
               </span>
-              <h2 style={{ margin: '8px 0 4px', fontSize: '1.3rem', fontWeight: 800, letterSpacing: '-0.02em' }}>
+              <h2 style={{ margin: '8px 0 4px', fontSize: '1.3rem', fontWeight: 800 }}>
                 {isChurch ? settings.churchName : settings.cellName}
               </h2>
               <p style={{ margin: 0, fontSize: '0.84rem', color: '#cbd5e1' }}>
@@ -1290,11 +1203,11 @@ export default function App() {
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-              <div style={{ background: '#fff', padding: '16px', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+              <div style={{ background: '#fff', padding: '16px', borderRadius: '16px', border: '1px solid #e2e8f0' }}>
                 <span style={{ fontSize: '0.74rem', color: '#64748b', fontWeight: 600 }}>Hermanos en lista</span>
                 <p style={{ margin: '6px 0 0', fontSize: '1.6rem', fontWeight: 800, color: '#0f172a' }}>{members.length}</p>
               </div>
-              <div style={{ background: '#fff', padding: '16px', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+              <div style={{ background: '#fff', padding: '16px', borderRadius: '16px', border: '1px solid #e2e8f0' }}>
                 <span style={{ fontSize: '0.74rem', color: '#64748b', fontWeight: 600 }}>Cultos este mes</span>
                 <p style={{ margin: '6px 0 0', fontSize: '1.6rem', fontWeight: 800, color: '#0f172a' }}>{visibleEvents.length}</p>
               </div>
@@ -1315,30 +1228,7 @@ export default function App() {
               />
             </div>
 
-            <button
-              onClick={() => setShowImportMembersModal(true)}
-              style={{
-                width: '100%',
-                background: 'linear-gradient(135deg, #1e3a8a, #0f172a)',
-                color: '#fff',
-                border: 'none',
-                padding: '12px',
-                borderRadius: '12px',
-                fontWeight: 800,
-                fontSize: '0.82rem',
-                cursor: 'pointer',
-                marginBottom: '14px',
-                display: 'flex',
-                justifyContent: 'center',
-                alignItems: 'center',
-                gap: '8px'
-              }}
-            >
-              <span>👥</span>
-              <span>Importar Hermanos desde MySQL / JSON</span>
-            </button>
-
-            <form onSubmit={handleAddMember} style={{ background: '#fff', padding: '16px', borderRadius: '16px', border: '1px solid #e2e8f0', marginBottom: '16px', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+            <form onSubmit={handleAddMember} style={{ background: '#fff', padding: '16px', borderRadius: '16px', border: '1px solid #e2e8f0', marginBottom: '16px' }}>
               <h3 style={{ margin: '0 0 10px', fontSize: '0.92rem', fontWeight: 800, color: '#0f172a' }}>
                 + Registrar Hermano ({isChurch ? 'Iglesia' : 'Célula'})
               </h3>
@@ -1434,7 +1324,7 @@ export default function App() {
           </div>
         )}
 
-        {/* 5. AJUSTES */}
+        {/* 5. AJUSTES (RESPALDO Y RESTAURACIÓN 100% VISIBLES EN PANTALLA) */}
         {tab === 'ajustes' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             <form onSubmit={handleSaveSettings} style={{ background: '#fff', padding: '18px', borderRadius: '18px', border: '1px solid #e2e8f0' }}>
@@ -1544,42 +1434,90 @@ export default function App() {
               </button>
             </form>
 
-            {/* SECCIÓN RESPALDOS */}
-            <div style={{ background: '#fff', padding: '18px', borderRadius: '18px', border: '1px solid #e2e8f0' }}>
-              <h3 style={{ margin: '0 0 6px', fontSize: '0.92rem', fontWeight: 800 }}>📦 Base de Datos y Respaldos</h3>
-              <p style={{ fontSize: '0.74rem', color: '#64748b', margin: '0 0 14px' }}>
-                Exporta, restaura o importa miembros masivamente desde MySQL.
+            {/* SECCIÓN RESPALDOS DIRECTOS Y VISIBLES (SOLUCIÓN BLINDADA) */}
+            <div style={{ background: '#fff', padding: '18px', borderRadius: '18px', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+              <h3 style={{ margin: '0 0 6px', fontSize: '0.94rem', fontWeight: 800, color: '#0f172a' }}>📦 Copias de Seguridad (Exportar y Restaurar)</h3>
+              <p style={{ fontSize: '0.74rem', color: '#64748b', margin: '0 0 14px', lineHeight: 1.4 }}>
+                Guarda una copia de tus hermanos, cultos y finanzas para no perder nada si cambias de teléfono.
               </p>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowImportMembersModal(true)}
-                  style={{ width: '100%', background: '#1e3a8a', color: '#fff', border: 'none', padding: '12px', borderRadius: '10px', fontWeight: 800, fontSize: '0.82rem', cursor: 'pointer' }}
-                >
-                  👥 Importar Miembros desde MySQL (JSON)
-                </button>
+              {/* 1. EXPORTAR */}
+              <div style={{ background: '#f8fafc', padding: '14px', borderRadius: '14px', border: '1px solid #e2e8f0', marginBottom: '16px' }}>
+                <span style={{ display: 'block', fontSize: '0.78rem', fontWeight: 800, color: '#0f172a', marginBottom: '8px' }}>
+                  1. EXPORTAR (Generar y Copiar)
+                </span>
 
                 <button
                   type="button"
-                  onClick={openExportBackupModal}
-                  style={{ width: '100%', background: '#047857', color: '#fff', border: 'none', padding: '12px', borderRadius: '10px', fontWeight: 800, fontSize: '0.82rem', cursor: 'pointer' }}
+                  onClick={handleGenerateBackupDirect}
+                  style={{ width: '100%', background: '#047857', color: '#fff', border: 'none', padding: '12px', borderRadius: '10px', fontWeight: 800, fontSize: '0.82rem', cursor: 'pointer', marginBottom: '8px' }}
                 >
-                  📥 Exportar Respaldo Completo (con Finanzas)
+                  📋 GENERAR Y COPIAR RESPALDO
                 </button>
 
-                <label style={{ width: '100%', background: '#f1f5f9', color: '#0f172a', border: '1px solid #cbd5e1', padding: '11px', borderRadius: '10px', fontWeight: 700, fontSize: '0.78rem', cursor: 'pointer', textAlign: 'center', boxSizing: 'border-box', display: 'block' }}>
-                  📤 Restaurar desde Archivo .json
-                  <input type="file" accept=".json" onChange={handleRestoreFile} style={{ display: 'none' }} />
-                </label>
+                <textarea
+                  id="directBackupArea"
+                  readOnly
+                  rows={4}
+                  value={generatedBackupText}
+                  placeholder="Aquí aparecerá el código de tu respaldo..."
+                  style={{ width: '100%', padding: '8px', fontSize: '0.66rem', fontFamily: 'monospace', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box', marginBottom: '8px', background: '#ffffff' }}
+                />
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                  <button
+                    type="button"
+                    onClick={handleCopyGeneratedBackup}
+                    disabled={!generatedBackupText}
+                    style={{ background: '#1e293b', color: '#fff', border: 'none', padding: '9px', borderRadius: '8px', fontWeight: 700, fontSize: '0.74rem', cursor: 'pointer', opacity: generatedBackupText ? 1 : 0.5 }}
+                  >
+                    Copiar Código
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleShareBackupWhatsApp}
+                    disabled={!generatedBackupText}
+                    style={{ background: '#059669', color: '#fff', border: 'none', padding: '9px', borderRadius: '8px', fontWeight: 700, fontSize: '0.74rem', cursor: 'pointer', opacity: generatedBackupText ? 1 : 0.5 }}
+                  >
+                    📲 Enviar a WhatsApp
+                  </button>
+                </div>
+              </div>
+
+              {/* 2. RESTAURAR */}
+              <div style={{ background: '#f0fdf4', padding: '14px', borderRadius: '14px', border: '1px solid #bbf7d0' }}>
+                <span style={{ display: 'block', fontSize: '0.78rem', fontWeight: 800, color: '#166534', marginBottom: '8px' }}>
+                  2. RESTAURAR (Recuperar tus Datos)
+                </span>
+                <p style={{ fontSize: '0.72rem', color: '#475569', margin: '0 0 8px' }}>
+                  Pega aquí el código que copiaste anteriormente para recuperar todo:
+                </p>
+
+                <textarea
+                  rows={4}
+                  value={pastedRestoreText}
+                  onChange={e => setPastedRestoreText(e.target.value)}
+                  placeholder="Pega aquí el código de respaldo..."
+                  style={{ width: '100%', padding: '8px', fontSize: '0.66rem', fontFamily: 'monospace', borderRadius: '8px', border: '1px solid #86efac', boxSizing: 'border-box', marginBottom: '8px', background: '#ffffff' }}
+                />
 
                 <button
                   type="button"
-                  onClick={() => setShowPasteModal(true)}
-                  style={{ width: '100%', background: '#f8fafc', color: '#475569', border: '1px dashed #cbd5e1', padding: '10px', borderRadius: '10px', fontWeight: 700, fontSize: '0.76rem', cursor: 'pointer' }}
+                  onClick={handleRestoreFromTextDirect}
+                  disabled={!pastedRestoreText.trim()}
+                  style={{ width: '100%', background: '#0f172a', color: '#fff', border: 'none', padding: '12px', borderRadius: '10px', fontWeight: 800, fontSize: '0.82rem', cursor: 'pointer', opacity: pastedRestoreText.trim() ? 1 : 0.5, marginBottom: '10px' }}
                 >
-                  📋 O Restaurar pegando texto JSON
+                  🔄 RESTAURAR TODOS LOS DATOS
                 </button>
+
+                <div style={{ textAlign: 'center', fontSize: '0.7rem', color: '#64748b' }}>
+                  O si tienes el archivo en tu teléfono:
+                  <label style={{ display: 'block', marginTop: '4px', background: '#ffffff', color: '#0f172a', border: '1px solid #cbd5e1', padding: '8px', borderRadius: '8px', fontWeight: 700, cursor: 'pointer' }}>
+                    📁 Cargar archivo .json
+                    <input type="file" accept=".json" onChange={handleRestoreFileDirect} style={{ display: 'none' }} />
+                  </label>
+                </div>
               </div>
             </div>
           </div>
@@ -1598,7 +1536,6 @@ export default function App() {
             </p>
 
             <form onSubmit={handleSaveFinanceRecord} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {/* Tipo de Movimiento */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                 <button
                   type="button"
@@ -1641,7 +1578,6 @@ export default function App() {
                 </button>
               </div>
 
-              {/* Monto */}
               <div>
                 <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, marginBottom: '4px', color: '#334155' }}>Monto en dinero ($) *:</label>
                 <input
@@ -1655,7 +1591,6 @@ export default function App() {
                 />
               </div>
 
-              {/* Fecha */}
               <div>
                 <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, marginBottom: '4px', color: '#334155' }}>Fecha *:</label>
                 <input
@@ -1667,7 +1602,6 @@ export default function App() {
                 />
               </div>
 
-              {/* Categoría / Concepto contextual */}
               <div>
                 <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, marginBottom: '4px', color: '#334155' }}>Concepto / Categoría *:</label>
                 <select
@@ -1681,7 +1615,6 @@ export default function App() {
                 </select>
               </div>
 
-              {/* Asociar Hermano (Opcional, muy útil para Diezmos o donaciones) */}
               <div>
                 <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, marginBottom: '4px', color: '#334155' }}>Hermano (Opcional / Anónimo):</label>
                 <select
@@ -1696,7 +1629,6 @@ export default function App() {
                 </select>
               </div>
 
-              {/* Notas */}
               <div>
                 <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, marginBottom: '4px', color: '#334155' }}>Detalle o Nota adicional:</label>
                 <input
@@ -1772,7 +1704,7 @@ export default function App() {
                   <span style={{ display: 'block', fontSize: '0.74rem', fontWeight: 800, color: '#166534', marginBottom: '6px' }}>
                     🏠 Capacidades en la CÉLULA:
                   </span>
-                  <div style={{ display: 'flex', gap: '14px', fontSize: '0.76rem' }}>
+                  <div style={{ display: 'flex', gap: '14px', fontSize: '0.78rem' }}>
                     <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><input type="checkbox" checked={editLeadRole} onChange={e => setEditLeadRole(e.target.checked)} /> Puede dirigir</label>
                     <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><input type="checkbox" checked={editPreachRole} onChange={e => setEditPreachRole(e.target.checked)} /> Puede predicar</label>
                   </div>
@@ -1799,123 +1731,7 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL PARA IMPORTAR MIEMBROS DESDE MYSQL */}
-      {showImportMembersModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 140 }}>
-          <div style={{ background: '#fff', width: '100%', maxWidth: '420px', borderRadius: '20px', padding: '20px', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2)' }}>
-            <h3 style={{ margin: '0 0 6px', fontSize: '1.05rem', fontWeight: 800, color: '#0f172a' }}>👥 Importar Miembros desde MySQL</h3>
-            <p style={{ margin: '0 0 10px', fontSize: '0.74rem', color: '#64748b' }}>
-              Pega el resultado JSON de tu consulta MySQL o sube el archivo exportado:
-            </p>
-
-            <textarea
-              rows={7}
-              value={importMembersText}
-              onChange={e => setImportMembersText(e.target.value)}
-              placeholder='[{"fullName": "Juan Pérez", "phone": "3001234567", "canLead": 1, "canPreach": 1}, ...]'
-              style={{ width: '100%', padding: '10px', fontSize: '0.7rem', fontFamily: 'monospace', borderRadius: '10px', border: '1px solid #cbd5e1', boxSizing: 'border-box', marginBottom: '10px' }}
-            />
-
-            <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
-              <label style={{ flex: 1, background: '#f1f5f9', color: '#0f172a', border: '1px solid #cbd5e1', padding: '10px', borderRadius: '10px', fontWeight: 700, fontSize: '0.74rem', cursor: 'pointer', textAlign: 'center' }}>
-                📁 Subir archivo .json
-                <input type="file" accept=".json" onChange={handleImportMembersFile} style={{ display: 'none' }} />
-              </label>
-
-              <button
-                onClick={handleImportMembersSubmit}
-                disabled={!importMembersText.trim()}
-                style={{ flex: 1, background: '#047857', color: '#fff', border: 'none', padding: '10px', borderRadius: '10px', fontWeight: 800, fontSize: '0.74rem', cursor: 'pointer', opacity: importMembersText.trim() ? 1 : 0.6 }}
-              >
-                Cargar Texto Pegado
-              </button>
-            </div>
-
-            <button
-              onClick={() => setShowImportMembersModal(false)}
-              style={{ width: '100%', padding: '10px', background: '#e2e8f0', border: 'none', borderRadius: '10px', fontWeight: 700, cursor: 'pointer', fontSize: '0.78rem' }}
-            >
-              Cancelar
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL PARA EXPORTAR COPIA (INCLUYE FINANZAS) */}
-      {showExportModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 130 }}>
-          <div style={{ background: '#fff', width: '100%', maxWidth: '400px', borderRadius: '20px', padding: '20px', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2)' }}>
-            <h3 style={{ margin: '0 0 6px', fontSize: '1.05rem', fontWeight: 800, color: '#0f172a' }}>📥 Guardar Copia de Seguridad</h3>
-            <p style={{ margin: '0 0 14px', fontSize: '0.74rem', color: '#64748b' }}>
-              Elige cómo deseas respaldar tus datos (incluye miembros, cultos y finanzas):
-            </p>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '14px' }}>
-              <button
-                onClick={copyExportToClipboard}
-                style={{ width: '100%', background: '#047857', color: '#fff', border: 'none', padding: '12px', borderRadius: '10px', fontWeight: 800, fontSize: '0.82rem', cursor: 'pointer' }}
-              >
-                📋 Copiar Copia al Portapapeles
-              </button>
-
-              <button
-                onClick={shareNativeExport}
-                style={{ width: '100%', background: '#1e3a8a', color: '#fff', border: 'none', padding: '12px', borderRadius: '10px', fontWeight: 800, fontSize: '0.82rem', cursor: 'pointer' }}
-              >
-                📲 Compartir en Android (Drive, WhatsApp, etc.)
-              </button>
-
-              <button
-                onClick={downloadExportFile}
-                style={{ width: '100%', background: '#f1f5f9', color: '#0f172a', border: '1px solid #cbd5e1', padding: '10px', borderRadius: '10px', fontWeight: 700, fontSize: '0.78rem', cursor: 'pointer' }}
-              >
-                💾 Descargar como Archivo .json
-              </button>
-            </div>
-
-            <textarea
-              readOnly
-              rows={4}
-              value={exportJsonText}
-              style={{ width: '100%', padding: '8px', fontSize: '0.66rem', fontFamily: 'monospace', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box', marginBottom: '12px', background: '#f8fafc' }}
-            />
-
-            <button
-              onClick={() => setShowExportModal(false)}
-              style={{ width: '100%', padding: '10px', background: '#e2e8f0', border: 'none', borderRadius: '10px', fontWeight: 700, cursor: 'pointer', fontSize: '0.78rem' }}
-            >
-              Cerrar
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Modal para restaurar pegando texto JSON */}
-      {showPasteModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 120 }}>
-          <div style={{ background: '#fff', width: '100%', maxWidth: '380px', borderRadius: '20px', padding: '20px', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2)' }}>
-            <h3 style={{ margin: '0 0 6px', fontSize: '1rem', fontWeight: 800 }}>Pegar Respaldo JSON</h3>
-            <p style={{ margin: '0 0 10px', fontSize: '0.74rem', color: '#64748b' }}>Pega el texto de tu respaldo JSON:</p>
-            <textarea
-              rows={8}
-              value={pastedJsonText}
-              onChange={e => setPastedJsonText(e.target.value)}
-              placeholder='{"schemaVersion": 4, ...}'
-              style={{ width: '100%', padding: '10px', fontSize: '0.7rem', fontFamily: 'monospace', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box', marginBottom: '12px' }}
-            />
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button onClick={() => setShowPasteModal(false)} style={{ flex: 1, padding: '10px', background: '#e2e8f0', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: 'pointer' }}>
-                Cancelar
-              </button>
-              <button onClick={handleRestorePastedText} style={{ flex: 1, padding: '10px', background: '#0f172a', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: 'pointer' }}>
-                Restaurar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal de Asignación / Edición de Culto */}
+      {/* MODAL DE EDICIÓN DE CULTO */}
       {selectedEvent && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 100 }}>
           <div style={{ background: '#fff', width: '100%', maxWidth: '420px', maxHeight: '90vh', overflowY: 'auto', borderRadius: '20px', padding: '20px', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2)' }}>

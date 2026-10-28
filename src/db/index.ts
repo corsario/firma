@@ -10,15 +10,11 @@ export class CellDatabase extends Dexie {
   constructor() {
     super('LaVerdadDeCristoDB');
 
-    this.version(1).stores({
+    this.version(3).stores({
       members: 'id, fullName, canLead, canPreach, isActive, createdAt',
       events: 'id, date, type, status, leaderId, preacherId, generationKey',
+      finances: 'id, date, scope, type, category, memberId',
       settings: 'id'
-    });
-
-    // Version 2 con tabla de transacciones financieras
-    this.version(2).stores({
-      finances: 'id, date, scope, type, category, memberId'
     });
   }
 }
