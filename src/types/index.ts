@@ -7,6 +7,7 @@ export type EventType =
   | 'Otro';
 
 export type EventStatus = 'Programado' | 'Realizado' | 'Cancelado';
+export type TransactionType = 'ingreso' | 'egreso';
 
 export interface Member {
   id: string;
@@ -39,6 +40,19 @@ export interface CellEvent {
   helper3Id?: string | null;
   status: EventStatus;
   generationKey?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FinancialRecord {
+  id: string;
+  scope: 'celula' | 'iglesia';
+  type: TransactionType;
+  date: string;
+  amount: number;
+  category: string;
+  memberId?: string | null;
+  notes?: string;
   createdAt: string;
   updatedAt: string;
 }

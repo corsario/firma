@@ -1,15 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { db, DEFAULT_SETTINGS } from './db';
-import { Member, CellEvent, AppSettings } from './types';
+import { Member, CellEvent, FinancialRecord, AppSettings, TransactionType } from './types';
 import { MONTH_NAMES } from './services/dateUtils';
 
 const DAY_NAMES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
 export default function App() {
-  const [tab, setTab] = useState<'calendario' | 'inicio' | 'miembros' | 'ajustes'>('calendario');
+  const [tab, setTab] = useState<'calendario' | 'finanzas' | 'inicio' | 'miembros' | 'ajustes'>('calendario');
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [members, setMembers] = useState<Member[]>([]);
   const [events, setEvents] = useState<CellEvent[]>([]);
+  const [finances, setFinances] = useState<FinancialRecord[]>([]);
 
   const today = new Date();
   const [currentYear, setCurrentYear] = useState(today.getFullYear());
@@ -36,6 +37,16 @@ export default function App() {
   const [showImportMembersModal, setShowImportMembersModal] = useState(false);
   const [importMembersText, setImportMembersText] = useState('');
 
+  // Modal de Finanzas (Registrar movimiento)
+  const [showFinanceModal, setShowFinanceModal] = useState(false);
+  const [finType, setFinType] = useState<TransactionType>('ingreso');
+  const [finAmount, setFinAmount] = useState('');
+  const [finDate, setFinDate] = useState(new Date().toISOString().substring(0, 10));
+  const [finCategory, setFinCategory] = useState('');
+  const [finMemberId, setFinMemberId] = useState('');
+  const [finNotes, setFinNotes] = useState('');
+  const [finFilter, setFinFilter] = useState<'todos' | 'ingreso' | 'egreso'>('todos');
+
   // Modal de edición de miembro
   const [editingMember, setEditingMember] = useState<Member | null>(null);
   const [editMemberName, setEditMemberName] = useState('');
@@ -56,7 +67,7 @@ export default function App() {
   const [modalTime, setModalTime] = useState<string>('');
   const [modalStatus, setModalStatus] = useState<'Programado' | 'Realizado' | 'Cancelado'>('Programado');
 
-  // Formulario de nuevo miembro
+  // Formulario nuevo miembro
   const [newMemberName, setNewMemberName] = useState('');
   const [newMemberPhone, setNewMemberPhone] = useState('');
   const [canLeadRole, setCanLeadRole] = useState(false);
@@ -85,6 +96,9 @@ export default function App() {
 
     const e = await db.events.orderBy('date').toArray();
     setEvents(e);
+
+    const f = await db.finances.orderBy('date').toArray();
+    setFinances(f);
   };
 
   useEffect(() => {
@@ -98,7 +112,48 @@ export default function App() {
 
   const isChurch = settings.entityType === 'iglesia';
 
-  // Orden alfabético estricto A - Z
+  // Categorías según ámbito
+  const churchIncomeCategories = [
+    'Diezmo',
+    'Ofrenda de culto general',
+    'Ofrenda de ayuno',
+    'Pro-Templo / Construcción',
+    'Ofrenda recibida de células',
+    'Donación especial',
+    'Otro ingreso'
+  ];
+
+  const churchExpenseCategories = [
+    'Servicios públicos (Luz/Agua)',
+    'Mantenimiento del Templo',
+    'Santa Cena (Pan/Vino/Copitas)',
+    'Sonido e Instrumentos',
+    'Ayuda social / Benévola',
+    'Viáticos / Honorarios',
+    'Limpieza y aseo',
+    'Otro egreso'
+  ];
+
+  const cellIncomeCategories = [
+    'Ofrenda de reunión de célula',
+    'Aporte para refrigerio',
+    'Donación especial',
+    'Otro ingreso'
+  ];
+
+  const cellExpenseCategories = [
+    'Compra de refrigerios',
+    'Ayuda a hermano de célula',
+    'Entrega de sobre a la Iglesia',
+    'Material bíblico / Copias',
+    'Otro egreso'
+  ];
+
+  const currentCategories = isChurch
+    ? (finType === 'ingreso' ? churchIncomeCategories : churchExpenseCategories)
+    : (finType === 'ingreso' ? cellIncomeCategories : cellExpenseCategories);
+
+  // Orden alfabético A - Z
   const sortedMembers = [...members].sort((a, b) =>
     a.fullName.localeCompare(b.fullName, 'es', { sensitivity: 'base' })
   );
@@ -143,6 +198,10 @@ export default function App() {
     return `${DAY_NAMES[dt.getDay()]} ${d} de ${MONTH_NAMES[m - 1]}`;
   };
 
+  const formatCurrency = (val: number) => {
+    return '$' + val.toLocaleString('es-CO');
+  };
+
   // Guardar Ajustes
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -161,6 +220,92 @@ export default function App() {
     await db.settings.put(updated);
     setSettings(updated);
     showMsg(`¡Configuración de ${formEntityType === 'iglesia' ? 'la Iglesia' : 'la Célula'} guardada!`);
+  };
+
+  // 1. GESTIÓN FINANCIERA (GUARDAR MOVIMIENTO)
+  const openNewFinanceModal = () => {
+    setFinAmount('');
+    setFinDate(new Date().toISOString().substring(0, 10));
+    setFinType('ingreso');
+    setFinCategory(isChurch ? 'Diezmo' : 'Ofrenda de reunión de célula');
+    setFinMemberId('');
+    setFinNotes('');
+    setShowFinanceModal(true);
+  };
+
+  const handleSaveFinanceRecord = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const amountNum = parseFloat(finAmount);
+    if (isNaN(amountNum) || amountNum <= 0) {
+      showMsg('Por favor ingresa un monto válido mayor a cero.');
+      return;
+    }
+
+    const nowIso = new Date().toISOString();
+    await db.finances.add({
+      id: 'fin_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+      scope: settings.entityType,
+      type: finType,
+      date: finDate,
+      amount: amountNum,
+      category: finCategory || (currentCategories[0] || 'Varios'),
+      memberId: finMemberId || null,
+      notes: finNotes.trim() || undefined,
+      createdAt: nowIso,
+      updatedAt: nowIso
+    });
+
+    setShowFinanceModal(false);
+    await loadAll();
+    showMsg(`¡${finType === 'ingreso' ? 'Entrada' : 'Salida'} de ${formatCurrency(amountNum)} registrada con éxito!`);
+  };
+
+  const handleDeleteFinanceRecord = async (id: string) => {
+    if (window.confirm('¿Deseas eliminar este registro de finanzas?')) {
+      await db.finances.delete(id);
+      await loadAll();
+      showMsg('Movimiento eliminado.');
+    }
+  };
+
+  // Reporte Financiero para WhatsApp
+  const handleShareFinanceWhatsApp = () => {
+    const ym = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
+    const monthFinances = finances.filter(f => f.date.startsWith(ym) && f.scope === settings.entityType);
+
+    if (monthFinances.length === 0) {
+      showMsg('No hay movimientos financieros en este mes para generar informe.');
+      return;
+    }
+
+    const totalIngresos = monthFinances.filter(f => f.type === 'ingreso').reduce((acc, curr) => acc + curr.amount, 0);
+    const totalEgresos = monthFinances.filter(f => f.type === 'egreso').reduce((acc, curr) => acc + curr.amount, 0);
+    const balanceNeto = totalIngresos - totalEgresos;
+
+    // Desglose por categorías
+    const catMap: Record<string, number> = {};
+    monthFinances.forEach(f => {
+      const prefix = f.type === 'ingreso' ? '• ' : '• ';
+      const key = `${prefix}${f.category}`;
+      catMap[key] = (catMap[key] || 0) + f.amount;
+    });
+
+    let text = `*${isChurch ? settings.churchName.toUpperCase() : settings.cellName.toUpperCase()}*\n`;
+    text += isChurch ? `📍 ${settings.churchLocation}\n` : `${settings.territory} • ${settings.cellLocation}\n`;
+    text += `*INFORME FINANCIERO — ${MONTH_NAMES[currentMonth].toUpperCase()} ${currentYear}*\n\n`;
+
+    text += `📈 *TOTAL INGRESOS:* ${formatCurrency(totalIngresos)}\n`;
+    const ingresosItems = Object.entries(catMap).filter(([k]) => k.startsWith('• ') && monthFinances.some(f => f.category === k.replace('• ', '') && f.type === 'ingreso'));
+    ingresosItems.forEach(([k, v]) => { text += `  ${k}: ${formatCurrency(v)}\n`; });
+
+    text += `\n📉 *TOTAL EGRESOS:* ${formatCurrency(totalEgresos)}\n`;
+    const egresosItems = Object.entries(catMap).filter(([k]) => k.startsWith('• ') && monthFinances.some(f => f.category === k.replace('• ', '') && f.type === 'egreso'));
+    egresosItems.forEach(([k, v]) => { text += `  ${k}: ${formatCurrency(v)}\n`; });
+
+    text += `\n────────────────\n`;
+    text += `💰 *SALDO EN CAJA:* ${formatCurrency(balanceNeto)}\n`;
+
+    window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
   };
 
   // Importar desde MySQL
@@ -239,14 +384,15 @@ export default function App() {
     reader.readAsText(file);
   };
 
-  // Respaldos
+  // Respaldos (incluye miembros, cultos y finanzas)
   const openExportBackupModal = () => {
     const data = {
-      schemaVersion: 3,
+      schemaVersion: 4,
       exportedAt: new Date().toISOString(),
       settings,
       members,
-      events
+      events,
+      finances
     };
     setExportJsonText(JSON.stringify(data, null, 2));
     setShowExportModal(true);
@@ -312,13 +458,18 @@ export default function App() {
       return;
     }
     if (window.confirm('¿Deseas restaurar esta copia? Reemplazará los datos actuales.')) {
-      await db.transaction('rw', [db.settings, db.members, db.events], async () => {
+      await db.transaction('rw', [db.settings, db.members, db.events, db.finances], async () => {
         await db.settings.clear();
         await db.members.clear();
         await db.events.clear();
+        await db.finances.clear();
+
         await db.settings.put(parsed.settings);
         if (parsed.members.length > 0) await db.members.bulkAdd(parsed.members);
         if (parsed.events.length > 0) await db.events.bulkAdd(parsed.events);
+        if (parsed.finances && Array.isArray(parsed.finances) && parsed.finances.length > 0) {
+          await db.finances.bulkAdd(parsed.finances);
+        }
       });
       await loadAll();
       showMsg('¡Copia restaurada con éxito!');
@@ -351,7 +502,7 @@ export default function App() {
     }
   };
 
-  // UN SOLO BOTÓN: Generar y Asignar Mes
+  // UN SOLO BOTÓN: Generar y Asignar Cultos
   const handleGenerateAndAssign = async () => {
     const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
     const nowIso = new Date().toISOString();
@@ -552,6 +703,7 @@ export default function App() {
     showMsg(`⚡ ¡Mes generado y hermanos asignados para ${isChurch ? 'la Iglesia' : 'la Célula'}!`);
   };
 
+  // Edición de culto
   const openEditEvent = (ev: CellEvent) => {
     setSelectedEvent(ev);
     setModalLeaderId(ev.leaderId || '');
@@ -728,6 +880,25 @@ export default function App() {
     return isChurch ? e.type !== 'Servicio de célula' : e.type === 'Servicio de célula';
   });
 
+  // Cálculos de Finanzas del Mes
+  const currentMonthFinances = finances.filter(f =>
+    f.date.startsWith(ymCurrent) && f.scope === settings.entityType
+  );
+
+  const totalIngresosMes = currentMonthFinances
+    .filter(f => f.type === 'ingreso')
+    .reduce((acc, curr) => acc + curr.amount, 0);
+
+  const totalEgresosMes = currentMonthFinances
+    .filter(f => f.type === 'egreso')
+    .reduce((acc, curr) => acc + curr.amount, 0);
+
+  const balanceNetoMes = totalIngresosMes - totalEgresosMes;
+
+  const filteredFinancesList = currentMonthFinances
+    .filter(f => finFilter === 'todos' ? true : f.type === finFilter)
+    .sort((a, b) => b.date.localeCompare(a.date));
+
   return (
     <div style={{ maxWidth: '480px', margin: '0 auto', minHeight: '100vh', background: '#f8fafc', paddingBottom: '80px', display: 'flex', flexDirection: 'column', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
       
@@ -751,7 +922,6 @@ export default function App() {
         </div>
       </header>
 
-      {/* Notificación Toast Flotante */}
       {notice && (
         <div style={{ background: '#0f172a', color: '#f8fafc', padding: '10px 16px', fontSize: '0.82rem', textAlign: 'center', fontWeight: 700, borderBottom: '2px solid #f59e0b', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
           {notice}
@@ -764,7 +934,6 @@ export default function App() {
         {/* 1. CALENDARIO */}
         {tab === 'calendario' && (
           <div>
-            {/* Navegación del mes */}
             <div style={{ background: '#ffffff', padding: '12px 16px', borderRadius: '16px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
               <button onClick={() => { if (currentMonth === 0) { setCurrentMonth(11); setCurrentYear(y => y - 1); } else { setCurrentMonth(m => m - 1); } }} style={{ background: '#f1f5f9', border: 'none', width: '36px', height: '36px', borderRadius: '10px', cursor: 'pointer', fontWeight: 800, color: '#334155' }}>◀</button>
               <div style={{ textAlign: 'center' }}>
@@ -776,7 +945,6 @@ export default function App() {
               <button onClick={() => { if (currentMonth === 11) { setCurrentMonth(0); setCurrentYear(y => y + 1); } else { setCurrentMonth(m => m + 1); } }} style={{ background: '#f1f5f9', border: 'none', width: '36px', height: '36px', borderRadius: '10px', cursor: 'pointer', fontWeight: 800, color: '#334155' }}>▶</button>
             </div>
 
-            {/* UN SOLO BOTÓN PRINCIPAL: GENERAR Y ASIGNAR */}
             <button
               onClick={handleGenerateAndAssign}
               style={{
@@ -801,7 +969,6 @@ export default function App() {
               <span>{isChurch ? 'Generar y Asignar Mes (Iglesia)' : 'Generar y Asignar Mes (Célula)'}</span>
             </button>
 
-            {/* Botón WhatsApp */}
             <button
               onClick={handleShareWhatsApp}
               style={{
@@ -826,7 +993,6 @@ export default function App() {
               <span>Compartir Programación por WhatsApp</span>
             </button>
 
-            {/* Lista de cultos */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               {visibleEvents.length === 0 ? (
                 <div style={{ background: '#fff', padding: '32px 20px', borderRadius: '18px', textAlign: 'center', color: '#64748b', fontSize: '0.85rem', border: '1px dashed #cbd5e1' }}>
@@ -849,8 +1015,7 @@ export default function App() {
                         borderRadius: '18px',
                         border: isCena ? '2px solid #b45309' : isChurch ? '1px solid #e2e8f0' : '1px solid #bbf7d0',
                         padding: '16px',
-                        boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
-                        position: 'relative'
+                        boxShadow: '0 2px 8px rgba(0,0,0,0.04)'
                       }}
                     >
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
@@ -873,7 +1038,6 @@ export default function App() {
                         </div>
                       )}
 
-                      {/* Tarjetas de Responsables */}
                       <div style={{ background: '#f8fafc', padding: '10px 12px', borderRadius: '12px', border: '1px solid #e2e8f0', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: isCena ? '8px' : '12px' }}>
                         <div>
                           <span style={{ display: 'block', fontSize: '0.66rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 700 }}>Dirige:</span>
@@ -889,7 +1053,6 @@ export default function App() {
                         </div>
                       </div>
 
-                      {/* Santa Cena */}
                       {isCena && (
                         <div style={{ background: '#fef3c7', padding: '12px', borderRadius: '12px', border: '1px solid #fde68a', marginBottom: '12px', fontSize: '0.75rem' }}>
                           <div style={{ fontWeight: 800, color: '#92400e', marginBottom: '6px' }}>🍞🍷 Encargados de la Cena del Señor:</div>
@@ -914,7 +1077,196 @@ export default function App() {
           </div>
         )}
 
-        {/* 2. INICIO */}
+        {/* 2. FINANZAS (PROPUESTA 1: DIFERENCIADA IGLESIA VS CÉLULA) */}
+        {tab === 'finanzas' && (
+          <div>
+            {/* Navegación del mes */}
+            <div style={{ background: '#ffffff', padding: '12px 16px', borderRadius: '16px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
+              <button onClick={() => { if (currentMonth === 0) { setCurrentMonth(11); setCurrentYear(y => y - 1); } else { setCurrentMonth(m => m - 1); } }} style={{ background: '#f1f5f9', border: 'none', width: '36px', height: '36px', borderRadius: '10px', cursor: 'pointer', fontWeight: 800 }}>◀</button>
+              <div style={{ textAlign: 'center' }}>
+                <span style={{ fontSize: '1rem', fontWeight: 800, color: '#0f172a' }}>Finanzas: {MONTH_NAMES[currentMonth]} {currentYear}</span>
+                <span style={{ display: 'block', fontSize: '0.72rem', color: isChurch ? '#1e40af' : '#166534', fontWeight: 700 }}>
+                  {isChurch ? '🏛️ Tesorería de la Iglesia' : '🏠 Caja de Célula'}
+                </span>
+              </div>
+              <button onClick={() => { if (currentMonth === 11) { setCurrentMonth(0); setCurrentYear(y => y + 1); } else { setCurrentMonth(m => m + 1); } }} style={{ background: '#f1f5f9', border: 'none', width: '36px', height: '36px', borderRadius: '10px', cursor: 'pointer', fontWeight: 800 }}>▶</button>
+            </div>
+
+            {/* Tarjetas de Balance Superior */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
+              <div style={{ background: '#ffffff', padding: '14px', borderRadius: '14px', border: '1px solid #bbf7d0', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+                <span style={{ fontSize: '0.72rem', color: '#166534', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <span>📈</span> Entradas (Mes)
+                </span>
+                <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#15803d', marginTop: '4px' }}>
+                  {formatCurrency(totalIngresosMes)}
+                </div>
+              </div>
+
+              <div style={{ background: '#ffffff', padding: '14px', borderRadius: '14px', border: '1px solid #fecaca', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+                <span style={{ fontSize: '0.72rem', color: '#991b1b', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <span>📉</span> Salidas (Mes)
+                </span>
+                <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#dc2626', marginTop: '4px' }}>
+                  {formatCurrency(totalEgresosMes)}
+                </div>
+              </div>
+            </div>
+
+            {/* Saldo en Caja Disponible */}
+            <div style={{ background: 'linear-gradient(135deg, #0f172a, #1e3a8a)', color: '#fff', padding: '16px', borderRadius: '16px', marginBottom: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: '0 4px 10px rgba(15, 23, 42, 0.15)' }}>
+              <div>
+                <span style={{ fontSize: '0.72rem', color: '#f59e0b', textTransform: 'uppercase', fontWeight: 800 }}>Saldo Neto en Caja</span>
+                <div style={{ fontSize: '1.45rem', fontWeight: 800, letterSpacing: '-0.02em', marginTop: '2px' }}>
+                  {formatCurrency(balanceNetoMes)}
+                </div>
+              </div>
+              <div style={{ fontSize: '2rem' }}>💰</div>
+            </div>
+
+            {/* Botones de Acción */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '14px' }}>
+              <button
+                onClick={openNewFinanceModal}
+                style={{
+                  background: isChurch ? '#1e3a8a' : '#047857',
+                  color: '#fff',
+                  border: 'none',
+                  padding: '12px',
+                  borderRadius: '12px',
+                  fontSize: '0.8rem',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+                }}
+              >
+                + Registrar Movimiento
+              </button>
+
+              <button
+                onClick={handleShareFinanceWhatsApp}
+                style={{
+                  background: '#059669',
+                  color: '#fff',
+                  border: 'none',
+                  padding: '12px',
+                  borderRadius: '12px',
+                  fontSize: '0.8rem',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+                }}
+              >
+                📲 Enviar WhatsApp
+              </button>
+            </div>
+
+            {/* Filtro Rápido */}
+            <div style={{ display: 'flex', gap: '6px', marginBottom: '12px' }}>
+              {[
+                { id: 'todos', label: 'Todos' },
+                { id: 'ingreso', label: 'Solo Entradas' },
+                { id: 'egreso', label: 'Solo Salidas' }
+              ].map(f => (
+                <button
+                  key={f.id}
+                  onClick={() => setFinFilter(f.id as any)}
+                  style={{
+                    flex: 1,
+                    padding: '8px',
+                    borderRadius: '8px',
+                    border: '1px solid #cbd5e1',
+                    background: finFilter === f.id ? '#0f172a' : '#ffffff',
+                    color: finFilter === f.id ? '#ffffff' : '#475569',
+                    fontSize: '0.72rem',
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Lista de Movimientos */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {filteredFinancesList.length === 0 ? (
+                <div style={{ background: '#fff', padding: '30px 20px', borderRadius: '16px', textAlign: 'center', color: '#64748b', fontSize: '0.82rem', border: '1px dashed #cbd5e1' }}>
+                  No hay movimientos registrados en este mes.<br/>
+                  Pulsa <strong>"+ Registrar Movimiento"</strong> para ingresar ofrendas, diezmos o gastos.
+                </div>
+              ) : (
+                filteredFinancesList.map(rec => {
+                  const isIngreso = rec.type === 'ingreso';
+                  const memberName = getMemberName(rec.memberId);
+
+                  return (
+                    <div
+                      key={rec.id}
+                      style={{
+                        background: '#ffffff',
+                        padding: '14px',
+                        borderRadius: '14px',
+                        border: isIngreso ? '1px solid #bbf7d0' : '1px solid #fecaca',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        boxShadow: '0 1px 2px rgba(0,0,0,0.02)'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <div
+                          style={{
+                            width: '36px',
+                            height: '36px',
+                            borderRadius: '10px',
+                            background: isIngreso ? '#dcfce7' : '#fee2e2',
+                            color: isIngreso ? '#15803d' : '#b91c1c',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '1.1rem',
+                            fontWeight: 800
+                          }}
+                        >
+                          {isIngreso ? '↗' : '↘'}
+                        </div>
+
+                        <div>
+                          <div style={{ fontWeight: 800, fontSize: '0.88rem', color: '#0f172a' }}>
+                            {rec.category}
+                          </div>
+                          <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: '2px' }}>
+                            📅 {rec.date} {memberName ? `• 👤 ${memberName}` : ''}
+                          </div>
+                          {rec.notes && (
+                            <div style={{ fontSize: '0.68rem', color: '#475569', marginTop: '2px', fontStyle: 'italic' }}>
+                              "{rec.notes}"
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontWeight: 800, fontSize: '0.96rem', color: isIngreso ? '#15803d' : '#dc2626' }}>
+                          {isIngreso ? '+' : '-'} {formatCurrency(rec.amount)}
+                        </div>
+                        <button
+                          onClick={() => handleDeleteFinanceRecord(rec.id)}
+                          style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: '0.7rem', cursor: 'pointer', marginTop: '4px', textDecoration: 'underline' }}
+                        >
+                          Eliminar
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* 3. INICIO */}
         {tab === 'inicio' && (
           <div>
             <div style={{ background: 'linear-gradient(135deg, #0f172a, #1e3a8a)', color: '#fff', padding: '22px 18px', borderRadius: '20px', marginBottom: '16px', border: '1px solid #b45309', boxShadow: '0 8px 16px rgba(15, 23, 42, 0.15)' }}>
@@ -927,9 +1279,14 @@ export default function App() {
               <p style={{ margin: 0, fontSize: '0.84rem', color: '#cbd5e1' }}>
                 {isChurch ? settings.churchLocation : `${settings.territory} • ${settings.cellLocation}`}
               </p>
-              <button onClick={() => setTab('calendario')} style={{ marginTop: '16px', background: '#f59e0b', border: 'none', color: '#0f172a', padding: '10px 18px', borderRadius: '10px', fontSize: '0.82rem', fontWeight: 800, cursor: 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
-                📅 Abrir Calendario
-              </button>
+              <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
+                <button onClick={() => setTab('calendario')} style={{ flex: 1, background: '#f59e0b', border: 'none', color: '#0f172a', padding: '10px 14px', borderRadius: '10px', fontSize: '0.8rem', fontWeight: 800, cursor: 'pointer' }}>
+                  📅 Calendario
+                </button>
+                <button onClick={() => setTab('finanzas')} style={{ flex: 1, background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.3)', color: '#fff', padding: '10px 14px', borderRadius: '10px', fontSize: '0.8rem', fontWeight: 800, cursor: 'pointer' }}>
+                  💰 Finanzas
+                </button>
+              </div>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
@@ -945,17 +1302,16 @@ export default function App() {
           </div>
         )}
 
-        {/* 3. MIEMBROS */}
+        {/* 4. MIEMBROS */}
         {tab === 'miembros' && (
           <div>
-            {/* Buscador de miembros en vivo */}
             <div style={{ position: 'relative', marginBottom: '12px' }}>
               <input
                 type="text"
                 placeholder="🔍 Buscar hermano por nombre o teléfono..."
                 value={memberSearch}
                 onChange={e => setMemberSearch(e.target.value)}
-                style={{ width: '100%', padding: '11px 14px', borderRadius: '12px', border: '1px solid #cbd5e1', background: '#ffffff', fontSize: '0.82rem', boxSizing: 'border-box', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}
+                style={{ width: '100%', padding: '11px 14px', borderRadius: '12px', border: '1px solid #cbd5e1', background: '#ffffff', fontSize: '0.82rem', boxSizing: 'border-box' }}
               />
             </div>
 
@@ -975,15 +1331,13 @@ export default function App() {
                 display: 'flex',
                 justifyContent: 'center',
                 alignItems: 'center',
-                gap: '8px',
-                boxShadow: '0 2px 6px rgba(30, 58, 138, 0.2)'
+                gap: '8px'
               }}
             >
               <span>👥</span>
               <span>Importar Hermanos desde MySQL / JSON</span>
             </button>
 
-            {/* Formulario nuevo miembro */}
             <form onSubmit={handleAddMember} style={{ background: '#fff', padding: '16px', borderRadius: '16px', border: '1px solid #e2e8f0', marginBottom: '16px', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
               <h3 style={{ margin: '0 0 10px', fontSize: '0.92rem', fontWeight: 800, color: '#0f172a' }}>
                 + Registrar Hermano ({isChurch ? 'Iglesia' : 'Célula'})
@@ -1021,7 +1375,6 @@ export default function App() {
               <span style={{ fontSize: '0.72rem', color: '#64748b' }}>{filteredMembers.length} de {members.length}</span>
             </div>
 
-            {/* Listado con Avatares circulares y botones Edit/Del */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {filteredMembers.map(m => {
                 const canL = memberCanLead(m);
@@ -1029,7 +1382,7 @@ export default function App() {
                 const initials = getInitials(m.fullName);
 
                 return (
-                  <div key={m.id} style={{ background: '#fff', padding: '12px 14px', borderRadius: '14px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: '0 1px 2px rgba(0,0,0,0.02)' }}>
+                  <div key={m.id} style={{ background: '#fff', padding: '12px 14px', borderRadius: '14px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, marginRight: '8px' }}>
                       <div style={{ width: '38px', height: '38px', borderRadius: '50%', background: isChurch ? '#dbeafe' : '#dcfce7', color: isChurch ? '#1e40af' : '#166534', fontWeight: 800, fontSize: '0.82rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         {initials}
@@ -1081,13 +1434,12 @@ export default function App() {
           </div>
         )}
 
-        {/* 4. AJUSTES CONFIGURABLES */}
+        {/* 5. AJUSTES */}
         {tab === 'ajustes' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            <form onSubmit={handleSaveSettings} style={{ background: '#fff', padding: '18px', borderRadius: '18px', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+            <form onSubmit={handleSaveSettings} style={{ background: '#fff', padding: '18px', borderRadius: '18px', border: '1px solid #e2e8f0' }}>
               <h3 style={{ margin: '0 0 14px', fontSize: '1rem', fontWeight: 800, color: '#0f172a' }}>⚙️ Configuración del Sistema</h3>
 
-              {/* Selector interactivo de tarjetas */}
               <div style={{ marginBottom: '16px' }}>
                 <span style={{ display: 'block', fontSize: '0.76rem', fontWeight: 800, color: '#475569', marginBottom: '8px' }}>
                   ¿Qué deseas administrar en esta aplicación?
@@ -1102,8 +1454,7 @@ export default function App() {
                       padding: '12px',
                       borderRadius: '12px',
                       cursor: 'pointer',
-                      textAlign: 'center',
-                      transition: 'all 0.2s ease'
+                      textAlign: 'center'
                     }}
                   >
                     <div style={{ fontSize: '1.4rem', marginBottom: '4px' }}>🏛️</div>
@@ -1121,8 +1472,7 @@ export default function App() {
                       padding: '12px',
                       borderRadius: '12px',
                       cursor: 'pointer',
-                      textAlign: 'center',
-                      transition: 'all 0.2s ease'
+                      textAlign: 'center'
                     }}
                   >
                     <div style={{ fontSize: '1.4rem', marginBottom: '4px' }}>🏠</div>
@@ -1195,7 +1545,7 @@ export default function App() {
             </form>
 
             {/* SECCIÓN RESPALDOS */}
-            <div style={{ background: '#fff', padding: '18px', borderRadius: '18px', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+            <div style={{ background: '#fff', padding: '18px', borderRadius: '18px', border: '1px solid #e2e8f0' }}>
               <h3 style={{ margin: '0 0 6px', fontSize: '0.92rem', fontWeight: 800 }}>📦 Base de Datos y Respaldos</h3>
               <p style={{ fontSize: '0.74rem', color: '#64748b', margin: '0 0 14px' }}>
                 Exporta, restaura o importa miembros masivamente desde MySQL.
@@ -1215,7 +1565,7 @@ export default function App() {
                   onClick={openExportBackupModal}
                   style={{ width: '100%', background: '#047857', color: '#fff', border: 'none', padding: '12px', borderRadius: '10px', fontWeight: 800, fontSize: '0.82rem', cursor: 'pointer' }}
                 >
-                  📥 Exportar Respaldo Completo
+                  📥 Exportar Respaldo Completo (con Finanzas)
                 </button>
 
                 <label style={{ width: '100%', background: '#f1f5f9', color: '#0f172a', border: '1px solid #cbd5e1', padding: '11px', borderRadius: '10px', fontWeight: 700, fontSize: '0.78rem', cursor: 'pointer', textAlign: 'center', boxSizing: 'border-box', display: 'block' }}>
@@ -1235,6 +1585,148 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {/* MODAL REGISTRAR MOVIMIENTO FINANCIERO */}
+      {showFinanceModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 160 }}>
+          <div style={{ background: '#fff', width: '100%', maxWidth: '400px', borderRadius: '20px', padding: '20px', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2)' }}>
+            <h3 style={{ margin: '0 0 6px', fontSize: '1.05rem', fontWeight: 800, color: '#0f172a' }}>
+              💰 Registrar Movimiento ({isChurch ? 'Iglesia' : 'Célula'})
+            </h3>
+            <p style={{ margin: '0 0 14px', fontSize: '0.74rem', color: '#64748b' }}>
+              Ingresa los datos del ingreso o egreso:
+            </p>
+
+            <form onSubmit={handleSaveFinanceRecord} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {/* Tipo de Movimiento */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFinType('ingreso');
+                    setFinCategory(isChurch ? churchIncomeCategories[0] : cellIncomeCategories[0]);
+                  }}
+                  style={{
+                    padding: '10px',
+                    borderRadius: '10px',
+                    border: finType === 'ingreso' ? '2px solid #15803d' : '1px solid #cbd5e1',
+                    background: finType === 'ingreso' ? '#dcfce7' : '#ffffff',
+                    color: finType === 'ingreso' ? '#15803d' : '#64748b',
+                    fontWeight: 800,
+                    fontSize: '0.8rem',
+                    cursor: 'pointer'
+                  }}
+                >
+                  📈 Entrada (Ingreso)
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFinType('egreso');
+                    setFinCategory(isChurch ? churchExpenseCategories[0] : cellExpenseCategories[0]);
+                  }}
+                  style={{
+                    padding: '10px',
+                    borderRadius: '10px',
+                    border: finType === 'egreso' ? '2px solid #b91c1c' : '1px solid #cbd5e1',
+                    background: finType === 'egreso' ? '#fee2e2' : '#ffffff',
+                    color: finType === 'egreso' ? '#b91c1c' : '#64748b',
+                    fontWeight: 800,
+                    fontSize: '0.8rem',
+                    cursor: 'pointer'
+                  }}
+                >
+                  📉 Salida (Gasto)
+                </button>
+              </div>
+
+              {/* Monto */}
+              <div>
+                <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, marginBottom: '4px', color: '#334155' }}>Monto en dinero ($) *:</label>
+                <input
+                  type="number"
+                  step="any"
+                  required
+                  placeholder="Ej. 50000"
+                  value={finAmount}
+                  onChange={e => setFinAmount(e.target.value)}
+                  style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '1rem', fontWeight: 800, boxSizing: 'border-box' }}
+                />
+              </div>
+
+              {/* Fecha */}
+              <div>
+                <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, marginBottom: '4px', color: '#334155' }}>Fecha *:</label>
+                <input
+                  type="date"
+                  required
+                  value={finDate}
+                  onChange={e => setFinDate(e.target.value)}
+                  style={{ width: '100%', padding: '9px', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
+                />
+              </div>
+
+              {/* Categoría / Concepto contextual */}
+              <div>
+                <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, marginBottom: '4px', color: '#334155' }}>Concepto / Categoría *:</label>
+                <select
+                  value={finCategory}
+                  onChange={e => setFinCategory(e.target.value)}
+                  style={{ width: '100%', padding: '9px', borderRadius: '8px', border: '1px solid #cbd5e1' }}
+                >
+                  {currentCategories.map(cat => (
+                    <option key={cat} value={cat}>{cat}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Asociar Hermano (Opcional, muy útil para Diezmos o donaciones) */}
+              <div>
+                <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, marginBottom: '4px', color: '#334155' }}>Hermano (Opcional / Anónimo):</label>
+                <select
+                  value={finMemberId}
+                  onChange={e => setFinMemberId(e.target.value)}
+                  style={{ width: '100%', padding: '9px', borderRadius: '8px', border: '1px solid #cbd5e1' }}
+                >
+                  <option value="">(Anónimo / No especificado)</option>
+                  {sortedMembers.map(m => (
+                    <option key={m.id} value={m.id}>{m.fullName}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Notas */}
+              <div>
+                <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, marginBottom: '4px', color: '#334155' }}>Detalle o Nota adicional:</label>
+                <input
+                  type="text"
+                  placeholder="Ej. Recibo de energía, ofrenda especial..."
+                  value={finNotes}
+                  onChange={e => setFinNotes(e.target.value)}
+                  style={{ width: '100%', padding: '9px', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowFinanceModal(false)}
+                  style={{ flex: 1, padding: '11px', background: '#e2e8f0', border: 'none', borderRadius: '10px', fontWeight: 700, cursor: 'pointer', fontSize: '0.8rem' }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  style={{ flex: 1, padding: '11px', background: '#0f172a', color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 800, cursor: 'pointer', fontSize: '0.8rem' }}
+                >
+                  Guardar
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* MODAL PARA EDITAR HERMANO */}
       {editingMember && (
@@ -1280,7 +1772,7 @@ export default function App() {
                   <span style={{ display: 'block', fontSize: '0.74rem', fontWeight: 800, color: '#166534', marginBottom: '6px' }}>
                     🏠 Capacidades en la CÉLULA:
                   </span>
-                  <div style={{ display: 'flex', gap: '14px', fontSize: '0.78rem' }}>
+                  <div style={{ display: 'flex', gap: '14px', fontSize: '0.76rem' }}>
                     <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><input type="checkbox" checked={editLeadRole} onChange={e => setEditLeadRole(e.target.checked)} /> Puede dirigir</label>
                     <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><input type="checkbox" checked={editPreachRole} onChange={e => setEditPreachRole(e.target.checked)} /> Puede predicar</label>
                   </div>
@@ -1349,13 +1841,13 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL PARA EXPORTAR COPIA */}
+      {/* MODAL PARA EXPORTAR COPIA (INCLUYE FINANZAS) */}
       {showExportModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 130 }}>
           <div style={{ background: '#fff', width: '100%', maxWidth: '400px', borderRadius: '20px', padding: '20px', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2)' }}>
             <h3 style={{ margin: '0 0 6px', fontSize: '1.05rem', fontWeight: 800, color: '#0f172a' }}>📥 Guardar Copia de Seguridad</h3>
             <p style={{ margin: '0 0 14px', fontSize: '0.74rem', color: '#64748b' }}>
-              Elige cómo deseas respaldar tus datos de {isChurch ? 'la Iglesia' : 'la Célula'}:
+              Elige cómo deseas respaldar tus datos (incluye miembros, cultos y finanzas):
             </p>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '14px' }}>
@@ -1408,14 +1900,14 @@ export default function App() {
               rows={8}
               value={pastedJsonText}
               onChange={e => setPastedJsonText(e.target.value)}
-              placeholder='{"schemaVersion": 3, ...}'
+              placeholder='{"schemaVersion": 4, ...}'
               style={{ width: '100%', padding: '10px', fontSize: '0.7rem', fontFamily: 'monospace', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box', marginBottom: '12px' }}
             />
             <div style={{ display: 'flex', gap: '8px' }}>
-              <button onClick={() => setShowPasteModal(false)} style={{ flex: 1, padding: '10px', background: '#e2e8f0', border: 'none', borderRadius: '10px', fontWeight: 700, cursor: 'pointer' }}>
+              <button onClick={() => setShowPasteModal(false)} style={{ flex: 1, padding: '10px', background: '#e2e8f0', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: 'pointer' }}>
                 Cancelar
               </button>
-              <button onClick={handleRestorePastedText} style={{ flex: 1, padding: '10px', background: '#0f172a', color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 700, cursor: 'pointer' }}>
+              <button onClick={handleRestorePastedText} style={{ flex: 1, padding: '10px', background: '#0f172a', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: 'pointer' }}>
                 Restaurar
               </button>
             </div>
@@ -1457,7 +1949,7 @@ export default function App() {
 
                   <div>
                     <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, marginBottom: '4px' }}>🍞 Ora por el Pan:</label>
-                    <select value={modalBreadId} onChange={e => setModalBreadId(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
+                    <select value={modalBreadId} onChange={e => setModalBreadId(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
                       <option value="">(Pendiente)</option>
                       {sortedMembers.map(m => <option key={m.id} value={m.id}>{m.fullName}</option>)}
                     </select>
@@ -1465,7 +1957,7 @@ export default function App() {
 
                   <div>
                     <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, marginBottom: '4px' }}>🍷 Ora por el Vino:</label>
-                    <select value={modalWineId} onChange={e => setModalWineId(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
+                    <select value={modalWineId} onChange={e => setModalWineId(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
                       <option value="">(Pendiente)</option>
                       {sortedMembers.map(m => <option key={m.id} value={m.id}>{m.fullName}</option>)}
                     </select>
@@ -1473,7 +1965,7 @@ export default function App() {
 
                   <div>
                     <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, marginBottom: '4px' }}>🤝 Colaborador 1:</label>
-                    <select value={modalHelper1Id} onChange={e => setModalHelper1Id(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
+                    <select value={modalHelper1Id} onChange={e => setModalHelper1Id(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
                       <option value="">(Pendiente)</option>
                       {sortedMembers.map(m => <option key={m.id} value={m.id}>{m.fullName}</option>)}
                     </select>
@@ -1481,7 +1973,7 @@ export default function App() {
 
                   <div>
                     <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, marginBottom: '4px' }}>🤝 Colaborador 2:</label>
-                    <select value={modalHelper2Id} onChange={e => setModalHelper2Id(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
+                    <select value={modalHelper2Id} onChange={e => setModalHelper2Id(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
                       <option value="">(Pendiente)</option>
                       {sortedMembers.map(m => <option key={m.id} value={m.id}>{m.fullName}</option>)}
                     </select>
@@ -1489,7 +1981,7 @@ export default function App() {
 
                   <div>
                     <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, marginBottom: '4px' }}>🤝 Colaborador 3:</label>
-                    <select value={modalHelper3Id} onChange={e => setModalHelper3Id(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
+                    <select value={modalHelper3Id} onChange={e => setModalHelper3Id(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
                       <option value="">(Pendiente)</option>
                       {sortedMembers.map(m => <option key={m.id} value={m.id}>{m.fullName}</option>)}
                     </select>
@@ -1533,10 +2025,11 @@ export default function App() {
         </div>
       )}
 
-      {/* 3. BARRA DE NAVEGACIÓN INFERIOR ELEGANTE */}
+      {/* 3. BARRA DE NAVEGACIÓN INFERIOR (5 PESTAÑAS) */}
       <nav style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: '#ffffff', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-around', padding: '8px 0', maxWidth: '480px', margin: '0 auto', zIndex: 50, boxShadow: '0 -2px 10px rgba(0,0,0,0.03)' }}>
         {[
           { id: 'calendario', label: 'Calendario', icon: '📅' },
+          { id: 'finanzas', label: 'Finanzas', icon: '💰' },
           { id: 'inicio', label: 'Inicio', icon: '🏠' },
           { id: 'miembros', label: 'Miembros', icon: '👥' },
           { id: 'ajustes', label: 'Ajustes', icon: '⚙️' }
@@ -1550,14 +2043,14 @@ export default function App() {
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
-              color: tab === item.id ? '#0f172a' : '#94a3b8',
+              color: tab === item.id ? (isChurch ? '#1e40af' : '#166534') : '#94a3b8',
               fontWeight: tab === item.id ? 800 : 600,
-              fontSize: '0.72rem',
+              fontSize: '0.7rem',
               cursor: 'pointer',
-              padding: '4px 12px'
+              padding: '4px 6px'
             }}
           >
-            <span style={{ fontSize: '1.25rem', marginBottom: '2px' }}>{item.icon}</span>
+            <span style={{ fontSize: '1.2rem', marginBottom: '2px' }}>{item.icon}</span>
             {item.label}
           </button>
         ))}
