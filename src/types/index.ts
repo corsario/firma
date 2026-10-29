@@ -4,6 +4,9 @@ export type EventType =
   | 'Curso de bautismo'
   | 'Escuela Dominical'
   | 'Cena del Señor'
+  | 'Vigilia'
+  | 'Evangelización'
+  | 'Actividad especial'
   | 'Otro';
 
 export type EventStatus = 'Programado' | 'Realizado' | 'Cancelado';
@@ -26,6 +29,7 @@ export interface Member {
 
 export interface CellEvent {
   id: string;
+  scope?: 'celula' | 'iglesia';
   title: string;
   type: EventType;
   date: string;
@@ -38,6 +42,7 @@ export interface CellEvent {
   helper1Id?: string | null;
   helper2Id?: string | null;
   helper3Id?: string | null;
+  notes?: string;
   status: EventStatus;
   generationKey?: string;
   createdAt: string;

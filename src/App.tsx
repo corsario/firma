@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db, DEFAULT_SETTINGS } from './db';
-import { Member, CellEvent, FinancialRecord, AppSettings, TransactionType } from './types';
+import { Member, CellEvent, FinancialRecord, AppSettings, TransactionType, EventType } from './types';
 import { MONTH_NAMES } from './services/dateUtils';
 
 const DAY_NAMES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
@@ -29,9 +29,20 @@ export default function App() {
   const [formCellDay, setFormCellDay] = useState(3);
   const [formCellTime, setFormCellTime] = useState('18:00');
 
-  // Sistema de respaldo directo en pantalla
+  // Respaldos directos
   const [generatedBackupText, setGeneratedBackupText] = useState('');
   const [pastedRestoreText, setPastedRestoreText] = useState('');
+
+  // Modal para agregar NUEVA ACTIVIDAD / EVENTO ESPECIAL
+  const [showNewEventModal, setShowNewEventModal] = useState(false);
+  const [newActTitle, setNewActTitle] = useState('');
+  const [newActType, setNewActType] = useState<EventType>('Actividad especial');
+  const [newActDate, setNewActDate] = useState('');
+  const [newActTime, setNewActTime] = useState('19:00');
+  const [newActLocation, setNewActLocation] = useState('');
+  const [newActLeaderId, setNewActLeaderId] = useState('');
+  const [newActPreacherId, setNewActPreacherId] = useState('');
+  const [newActNotes, setNewActNotes] = useState('');
 
   // Modal de Finanzas
   const [showFinanceModal, setShowFinanceModal] = useState(false);
@@ -50,8 +61,9 @@ export default function App() {
   const [editLeadRole, setEditLeadRole] = useState(false);
   const [editPreachRole, setEditPreachRole] = useState(false);
 
-  // Edición de culto
+  // Modal de edición de culto/actividad existente
   const [selectedEvent, setSelectedEvent] = useState<CellEvent | null>(null);
+  const [modalTitle, setModalTitle] = useState<string>('');
   const [modalLeaderId, setModalLeaderId] = useState<string>('');
   const [modalPreacherId, setModalPreacherId] = useState<string>('');
   const [modalBreadId, setModalBreadId] = useState<string>('');
@@ -61,6 +73,7 @@ export default function App() {
   const [modalHelper3Id, setModalHelper3Id] = useState<string>('');
   const [modalLocation, setModalLocation] = useState<string>('');
   const [modalTime, setModalTime] = useState<string>('');
+  const [modalNotes, setModalNotes] = useState<string>('');
   const [modalStatus, setModalStatus] = useState<'Programado' | 'Realizado' | 'Cancelado'>('Programado');
 
   // Formulario nuevo miembro
@@ -226,7 +239,7 @@ export default function App() {
     showMsg(`¡Configuración de ${formEntityType === 'iglesia' ? 'la Iglesia' : 'la Célula'} guardada!`);
   };
 
-  // 1. GENERAR Y COPIAR RESPALDO VISIBLE (100% FUNCIONAL EN ANDROID)
+  // Respaldos
   const handleGenerateBackupDirect = async () => {
     try {
       const data = {
@@ -240,7 +253,6 @@ export default function App() {
       const jsonStr = JSON.stringify(data, null, 2);
       setGeneratedBackupText(jsonStr);
 
-      // Copiar automáticamente al portapapeles
       let copied = false;
       try {
         if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -264,7 +276,7 @@ export default function App() {
 
       showMsg(copied ? '✅ ¡Copia generada y copiada al portapapeles!' : '✅ ¡Copia generada en el cuadro inferior!');
     } catch {
-      showMsg('Error al generar la copia de seguridad.');
+      showMsg('Error al generar el respaldo.');
     }
   };
 
@@ -285,32 +297,9 @@ export default function App() {
       return;
     }
     const header = `*COPIA DE SEGURIDAD ${settings.entityType === 'iglesia' ? settings.churchName.toUpperCase() : settings.cellName.toUpperCase()}*\n`;
-    const fullText = header + generatedBackupText;
-    window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(fullText)}`, '_blank');
+    window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(header + generatedBackupText)}`, '_blank');
   };
 
-  const handleDownloadBackupFile = () => {
-    if (!generatedBackupText) {
-      showMsg('Primero pulsa "Generar Copia de Respaldo".');
-      return;
-    }
-    try {
-      const blob = new Blob([generatedBackupText], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `Copia_${settings.entityType === 'iglesia' ? 'Iglesia' : 'Celula'}_${new Date().toISOString().substring(0, 10)}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      showMsg('Archivo descargado.');
-    } catch {
-      showMsg('Descarga bloqueada en este móvil. Usa "Copiar" o "WhatsApp".');
-    }
-  };
-
-  // 2. RESTAURAR RESPALDO DESDE TEXTO DIRECTO (INFALIBLE)
   const handleRestoreFromTextDirect = async () => {
     if (!pastedRestoreText.trim()) {
       showMsg('Pega el código de respaldo en el cuadro primero.');
@@ -324,7 +313,7 @@ export default function App() {
         return;
       }
 
-      if (window.confirm('¿Deseas restaurar esta copia? Reemplazará todos los datos actuales de la aplicación.')) {
+      if (window.confirm('¿Deseas restaurar esta copia? Reemplazará todos los datos actuales.')) {
         await db.transaction('rw', [db.settings, db.members, db.events, db.finances], async () => {
           if (parsed.settings) {
             await db.settings.clear();
@@ -349,7 +338,7 @@ export default function App() {
         showMsg('✅ ¡Todos los datos se restauraron con éxito!');
       }
     } catch {
-      showMsg('Error al leer el código. Asegúrate de pegarlo completo.');
+      showMsg('Error al restaurar. Asegúrate de pegar el código completo.');
     }
   };
 
@@ -359,8 +348,7 @@ export default function App() {
     const reader = new FileReader();
     reader.onload = async () => {
       try {
-        const text = reader.result as string;
-        setPastedRestoreText(text);
+        setPastedRestoreText(reader.result as string);
         showMsg('Archivo cargado en el cuadro. Pulsa "Restaurar".');
       } catch {
         showMsg('Error al leer el archivo.');
@@ -448,7 +436,7 @@ export default function App() {
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
   };
 
-  // UN SOLO BOTÓN: Generar y Asignar Cultos
+  // GENERAR Y ASIGNAR CULTOS HABITUALES
   const handleGenerateAndAssign = async () => {
     const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
     const nowIso = new Date().toISOString();
@@ -470,6 +458,7 @@ export default function App() {
           if (!exists) {
             await db.events.add({
               id: 'ev_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+              scope: 'iglesia',
               title: 'Culto de Ayuno y Oración',
               type: 'Ayuno',
               date,
@@ -492,6 +481,7 @@ export default function App() {
           if (!exists) {
             await db.events.add({
               id: 'ev_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+              scope: 'iglesia',
               title: isLastSunday ? 'Cena del Señor' : 'Escuela Dominical',
               type: isLastSunday ? 'Cena del Señor' : 'Escuela Dominical',
               date,
@@ -518,6 +508,7 @@ export default function App() {
           if (!exists) {
             await db.events.add({
               id: 'ev_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+              scope: 'celula',
               title: `Servicio de célula (${settings.cellName})`,
               type: 'Servicio de célula',
               date,
@@ -540,7 +531,7 @@ export default function App() {
     const targetEvents = allCurrentEvents.filter(e =>
       e.date.startsWith(ym) &&
       e.status === 'Programado' &&
-      (isChurch ? e.type !== 'Servicio de célula' : e.type === 'Servicio de célula')
+      isEventForCurrentScope(e)
     );
 
     const activeMembers = members.filter(m => m.isActive);
@@ -649,8 +640,57 @@ export default function App() {
     showMsg(`⚡ ¡Mes generado y hermanos asignados para ${isChurch ? 'la Iglesia' : 'la Célula'}!`);
   };
 
+  // 4. NUEVA ACTIVIDAD / EVENTO ESPECIAL (Vigilias, Evangelización, etc.)
+  const openNewCustomEventModal = () => {
+    const ym = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
+    const defaultDay = today.getFullYear() === currentYear && today.getMonth() === currentMonth
+      ? String(today.getDate()).padStart(2, '0')
+      : '15';
+
+    setNewActTitle('');
+    setNewActType('Actividad especial');
+    setNewActDate(`${ym}-${defaultDay}`);
+    setNewActTime(isChurch ? '19:00' : (settings.cellTime || '18:00'));
+    setNewActLocation(isChurch ? settings.churchLocation : settings.cellLocation);
+    setNewActLeaderId('');
+    setNewActPreacherId('');
+    setNewActNotes('');
+    setShowNewEventModal(true);
+  };
+
+  const handleSaveCustomEvent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newActTitle.trim() || !newActDate) {
+      showMsg('El título y la fecha son obligatorios.');
+      return;
+    }
+
+    const nowIso = new Date().toISOString();
+    await db.events.add({
+      id: 'act_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+      scope: settings.entityType,
+      title: newActTitle.trim(),
+      type: newActType,
+      date: newActDate,
+      startTime: newActTime || '18:00',
+      location: newActLocation.trim() || (isChurch ? settings.churchLocation : settings.cellLocation),
+      leaderId: newActLeaderId || null,
+      preacherId: newActPreacherId || null,
+      notes: newActNotes.trim() || undefined,
+      status: 'Programado',
+      createdAt: nowIso,
+      updatedAt: nowIso
+    });
+
+    setShowNewEventModal(false);
+    await loadAll();
+    showMsg(`¡Actividad "${newActTitle}" agregada al calendario!`);
+  };
+
+  // Edición de culto o actividad existente
   const openEditEvent = (ev: CellEvent) => {
     setSelectedEvent(ev);
+    setModalTitle(ev.title || '');
     setModalLeaderId(ev.leaderId || '');
     setModalPreacherId(ev.preacherId || '');
     setModalBreadId(ev.breadPrayerMemberId || '');
@@ -660,6 +700,7 @@ export default function App() {
     setModalHelper3Id(ev.helper3Id || '');
     setModalLocation(ev.location || (isChurch ? settings.churchLocation : settings.cellLocation));
     setModalTime(ev.startTime || (isChurch ? '10:00' : settings.cellTime));
+    setModalNotes(ev.notes || '');
     setModalStatus(ev.status || 'Programado');
   };
 
@@ -668,6 +709,7 @@ export default function App() {
     if (!selectedEvent) return;
 
     await db.events.update(selectedEvent.id, {
+      title: modalTitle.trim() || selectedEvent.title,
       leaderId: modalLeaderId || null,
       preacherId: modalPreacherId || null,
       breadPrayerMemberId: modalBreadId || null,
@@ -677,34 +719,36 @@ export default function App() {
       helper3Id: modalHelper3Id || null,
       location: modalLocation,
       startTime: modalTime,
+      notes: modalNotes.trim() || undefined,
       status: modalStatus
     });
 
     setSelectedEvent(null);
     await loadAll();
-    showMsg('Culto actualizado con éxito.');
+    showMsg('Evento actualizado con éxito.');
   };
 
   const handleDeleteEvent = async (id: string) => {
-    if (window.confirm('¿Deseas eliminar este culto?')) {
+    if (window.confirm('¿Deseas eliminar este evento/actividad del calendario?')) {
       await db.events.delete(id);
       setSelectedEvent(null);
       await loadAll();
-      showMsg('Culto eliminado.');
+      showMsg('Evento eliminado.');
     }
   };
 
+  // Compartir programación por WhatsApp
   const handleShareWhatsApp = () => {
     const ym = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
     const targetEvents = events
-      .filter(e => e.date.startsWith(ym) && e.status !== 'Cancelado' && (isChurch ? e.type !== 'Servicio de célula' : e.type === 'Servicio de célula'))
+      .filter(e => e.date.startsWith(ym) && e.status !== 'Cancelado' && isEventForCurrentScope(e))
       .sort((a, b) => {
         if (a.date !== b.date) return a.date.localeCompare(b.date);
         return a.startTime.localeCompare(b.startTime);
       });
 
     if (targetEvents.length === 0) {
-      showMsg('No hay cultos programados en este mes para compartir.');
+      showMsg('No hay actividades programadas en este mes.');
       return;
     }
 
@@ -728,8 +772,16 @@ export default function App() {
       }
 
       b += `📍 Lugar: ${ev.location || (isChurch ? settings.churchLocation : settings.cellLocation)}\n`;
-      b += `👤 Dirige: ${lName}\n`;
-      b += `📖 Predica: ${pName}`;
+
+      // Mostrar responsables si corresponden
+      if (ev.leaderId || ev.preacherId || ev.type === 'Servicio de célula' || isSunday || ev.type === 'Ayuno') {
+        b += `👤 Dirige: ${lName}\n`;
+        b += `📖 Predica: ${pName}`;
+      }
+
+      if (ev.notes) {
+        b += `\n📝 Detalle: ${ev.notes}`;
+      }
 
       if (ev.type === 'Cena del Señor') {
         const breadName = getMemberName(ev.breadPrayerMemberId) || 'Pendiente';
@@ -751,6 +803,7 @@ export default function App() {
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
   };
 
+  // Registrar miembro
   const handleAddMember = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMemberName.trim()) return;
@@ -817,10 +870,15 @@ export default function App() {
     }
   };
 
+  const isEventForCurrentScope = (e: CellEvent) => {
+    if (e.scope) return e.scope === settings.entityType;
+    return isChurch ? e.type !== 'Servicio de célula' : e.type === 'Servicio de célula';
+  };
+
   const ymCurrent = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
   const visibleEvents = events.filter(e => {
     if (!e.date.startsWith(ymCurrent)) return false;
-    return isChurch ? e.type !== 'Servicio de célula' : e.type === 'Servicio de célula';
+    return isEventForCurrentScope(e);
   });
 
   // Balance Financiero
@@ -851,7 +909,7 @@ export default function App() {
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <span style={{ fontSize: '1.2rem' }}>{isChurch ? '🏛️' : '🏠'}</span>
-              <h1 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, letterSpacing: '-0.02em', color: '#f8fafc' }}>
+              <h1 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, letterSpacing: '-0.02em', color: '#f8fafc' }}>
                 {isChurch ? settings.churchName : settings.cellName}
               </h1>
             </div>
@@ -877,40 +935,66 @@ export default function App() {
         {/* 1. CALENDARIO */}
         {tab === 'calendario' && (
           <div>
+            {/* Navegación del mes */}
             <div style={{ background: '#ffffff', padding: '12px 16px', borderRadius: '16px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
               <button onClick={() => { if (currentMonth === 0) { setCurrentMonth(11); setCurrentYear(y => y - 1); } else { setCurrentMonth(m => m - 1); } }} style={{ background: '#f1f5f9', border: 'none', width: '36px', height: '36px', borderRadius: '10px', cursor: 'pointer', fontWeight: 800 }}>◀</button>
               <div style={{ textAlign: 'center' }}>
                 <span style={{ fontSize: '1.05rem', fontWeight: 800, color: '#0f172a' }}>{MONTH_NAMES[currentMonth]} {currentYear}</span>
                 <span style={{ display: 'block', fontSize: '0.72rem', color: '#64748b', fontWeight: 600, marginTop: '2px' }}>
-                  {visibleEvents.length} culto(s) en {isChurch ? 'la Iglesia' : 'la Célula'}
+                  {visibleEvents.length} actividad(es) en {isChurch ? 'la Iglesia' : 'la Célula'}
                 </span>
               </div>
               <button onClick={() => { if (currentMonth === 11) { setCurrentMonth(0); setCurrentYear(y => y + 1); } else { setCurrentMonth(m => m + 1); } }} style={{ background: '#f1f5f9', border: 'none', width: '36px', height: '36px', borderRadius: '10px', cursor: 'pointer', fontWeight: 800 }}>▶</button>
             </div>
 
-            <button
-              onClick={handleGenerateAndAssign}
-              style={{
-                width: '100%',
-                background: isChurch ? 'linear-gradient(135deg, #1e3a8a, #0f172a)' : 'linear-gradient(135deg, #065f46, #022c22)',
-                color: '#fff',
-                border: 'none',
-                padding: '14px',
-                borderRadius: '14px',
-                fontSize: '0.88rem',
-                fontWeight: 800,
-                cursor: 'pointer',
-                marginBottom: '10px',
-                display: 'flex',
-                justifyContent: 'center',
-                alignItems: 'center',
-                gap: '8px'
-              }}
-            >
-              <span>⚡</span>
-              <span>{isChurch ? 'Generar y Asignar Mes (Iglesia)' : 'Generar y Asignar Mes (Célula)'}</span>
-            </button>
+            {/* BOTONES PRINCIPALES: GENERAR Y NUEVA ACTIVIDAD */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '10px' }}>
+              <button
+                onClick={handleGenerateAndAssign}
+                style={{
+                  background: isChurch ? '#1e3a8a' : '#065f46',
+                  color: '#fff',
+                  border: 'none',
+                  padding: '13px 8px',
+                  borderRadius: '12px',
+                  fontSize: '0.8rem',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  gap: '6px',
+                  boxShadow: '0 2px 5px rgba(0,0,0,0.1)'
+                }}
+              >
+                <span>⚡</span>
+                <span>Generar Mes</span>
+              </button>
 
+              <button
+                onClick={openNewCustomEventModal}
+                style={{
+                  background: '#b45309',
+                  color: '#fff',
+                  border: 'none',
+                  padding: '13px 8px',
+                  borderRadius: '12px',
+                  fontSize: '0.8rem',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  gap: '6px',
+                  boxShadow: '0 2px 5px rgba(180, 83, 9, 0.2)'
+                }}
+              >
+                <span>➕</span>
+                <span>Nueva Actividad</span>
+              </button>
+            </div>
+
+            {/* Botón WhatsApp */}
             <button
               onClick={handleShareWhatsApp}
               style={{
@@ -927,18 +1011,21 @@ export default function App() {
                 display: 'flex',
                 justifyContent: 'center',
                 alignItems: 'center',
-                gap: '8px'
+                gap: '8px',
+                boxShadow: '0 4px 10px rgba(5, 150, 105, 0.2)'
               }}
             >
               <span>📲</span>
               <span>Compartir Programación por WhatsApp</span>
             </button>
 
+            {/* Lista de cultos y actividades */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               {visibleEvents.length === 0 ? (
                 <div style={{ background: '#fff', padding: '32px 20px', borderRadius: '18px', textAlign: 'center', color: '#64748b', fontSize: '0.85rem', border: '1px dashed #cbd5e1' }}>
-                  No hay cultos programados para este mes.<br/>
-                  Pulsa arriba <strong>"⚡ Generar y Asignar Mes"</strong> para crearlos y sortearlos en 1 segundo.
+                  <div style={{ fontSize: '2rem', marginBottom: '8px' }}>📅</div>
+                  No hay actividades programadas en este mes.<br/>
+                  Pulsa <strong>"⚡ Generar Mes"</strong> para crear los cultos o <strong>"➕ Nueva Actividad"</strong> para vigilias o evangelizaciones.
                 </div>
               ) : (
                 visibleEvents.map(ev => {
@@ -946,6 +1033,7 @@ export default function App() {
                   const preacherName = getMemberName(ev.preacherId);
                   const isCena = ev.type === 'Cena del Señor';
                   const isSunday = ev.type === 'Escuela Dominical' || isCena;
+                  const isSpecial = ev.type === 'Vigilia' || ev.type === 'Evangelización' || ev.type === 'Actividad especial';
 
                   return (
                     <div
@@ -953,7 +1041,7 @@ export default function App() {
                       style={{
                         background: '#ffffff',
                         borderRadius: '18px',
-                        border: isCena ? '2px solid #b45309' : isChurch ? '1px solid #e2e8f0' : '1px solid #bbf7d0',
+                        border: isCena ? '2px solid #b45309' : isSpecial ? '2px solid #f59e0b' : isChurch ? '1px solid #e2e8f0' : '1px solid #bbf7d0',
                         padding: '16px',
                         boxShadow: '0 2px 8px rgba(0,0,0,0.04)'
                       }}
@@ -964,13 +1052,19 @@ export default function App() {
                       </div>
 
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                        <span style={{ fontSize: '0.86rem', fontWeight: 800, color: isCena ? '#b45309' : isChurch ? '#1e3a8a' : '#065f46' }}>
-                          {isCena ? '🍷 ' + ev.title : isChurch ? '⛪ ' + ev.title : '🏠 ' + ev.title}
+                        <span style={{ fontSize: '0.86rem', fontWeight: 800, color: isCena ? '#b45309' : isSpecial ? '#b45309' : isChurch ? '#1e3a8a' : '#065f46' }}>
+                          {isSpecial ? '⭐ ' + ev.title : isCena ? '🍷 ' + ev.title : isChurch ? '⛪ ' + ev.title : '🏠 ' + ev.title}
                         </span>
                         <span style={{ fontSize: '0.7rem', color: '#64748b' }}>
                           📍 {ev.location || (isChurch ? settings.churchLocation : settings.cellLocation)}
                         </span>
                       </div>
+
+                      {ev.notes && (
+                        <div style={{ background: '#f8fafc', padding: '6px 10px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '0.72rem', color: '#475569', marginBottom: '10px', fontStyle: 'italic' }}>
+                          📝 {ev.notes}
+                        </div>
+                      )}
 
                       {isChurch && isSunday && (
                         <div style={{ background: '#f8fafc', padding: '6px 10px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '0.72rem', color: '#334155', marginBottom: '10px', fontWeight: 600 }}>
@@ -1324,7 +1418,7 @@ export default function App() {
           </div>
         )}
 
-        {/* 5. AJUSTES (RESPALDO Y RESTAURACIÓN 100% VISIBLES EN PANTALLA) */}
+        {/* 5. AJUSTES */}
         {tab === 'ajustes' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             <form onSubmit={handleSaveSettings} style={{ background: '#fff', padding: '18px', borderRadius: '18px', border: '1px solid #e2e8f0' }}>
@@ -1434,14 +1528,13 @@ export default function App() {
               </button>
             </form>
 
-            {/* SECCIÓN RESPALDOS DIRECTOS Y VISIBLES (SOLUCIÓN BLINDADA) */}
-            <div style={{ background: '#fff', padding: '18px', borderRadius: '18px', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+            {/* SECCIÓN RESPALDOS DIRECTOS Y VISIBLES */}
+            <div style={{ background: '#fff', padding: '18px', borderRadius: '18px', border: '1px solid #e2e8f0' }}>
               <h3 style={{ margin: '0 0 6px', fontSize: '0.94rem', fontWeight: 800, color: '#0f172a' }}>📦 Copias de Seguridad (Exportar y Restaurar)</h3>
-              <p style={{ fontSize: '0.74rem', color: '#64748b', margin: '0 0 14px', lineHeight: 1.4 }}>
+              <p style={{ fontSize: '0.74rem', color: '#64748b', margin: '0 0 14px' }}>
                 Guarda una copia de tus hermanos, cultos y finanzas para no perder nada si cambias de teléfono.
               </p>
 
-              {/* 1. EXPORTAR */}
               <div style={{ background: '#f8fafc', padding: '14px', borderRadius: '14px', border: '1px solid #e2e8f0', marginBottom: '16px' }}>
                 <span style={{ display: 'block', fontSize: '0.78rem', fontWeight: 800, color: '#0f172a', marginBottom: '8px' }}>
                   1. EXPORTAR (Generar y Copiar)
@@ -1485,7 +1578,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* 2. RESTAURAR */}
               <div style={{ background: '#f0fdf4', padding: '14px', borderRadius: '14px', border: '1px solid #bbf7d0' }}>
                 <span style={{ display: 'block', fontSize: '0.78rem', fontWeight: 800, color: '#166534', marginBottom: '8px' }}>
                   2. RESTAURAR (Recuperar tus Datos)
@@ -1523,6 +1615,145 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {/* MODAL PARA AGREGAR NUEVA ACTIVIDAD / EVENTO ESPECIAL */}
+      {showNewEventModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 160 }}>
+          <div style={{ background: '#fff', width: '100%', maxWidth: '420px', maxHeight: '90vh', overflowY: 'auto', borderRadius: '20px', padding: '20px', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2)' }}>
+            <h3 style={{ margin: '0 0 4px', fontSize: '1.05rem', fontWeight: 800, color: '#0f172a' }}>
+              ➕ Programar Nueva Actividad
+            </h3>
+            <p style={{ margin: '0 0 12px', fontSize: '0.74rem', color: '#64748b' }}>
+              Agrega una vigilia, evangelización o evento especial para {isChurch ? 'la Iglesia' : 'la Célula'}:
+            </p>
+
+            {/* Sugerencias Rápidas */}
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '12px' }}>
+              {['Vigilia', 'Evangelización', 'Reunión de Jóvenes', 'Ayuno Especial', 'Tarde de Alabanza'].map(sug => (
+                <button
+                  type="button"
+                  key={sug}
+                  onClick={() => {
+                    setNewActTitle(sug);
+                    if (sug === 'Vigilia') setNewActType('Vigilia');
+                    else if (sug === 'Evangelización') setNewActType('Evangelización');
+                    else setNewActType('Actividad especial');
+                  }}
+                  style={{
+                    background: '#f1f5f9',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: '14px',
+                    padding: '4px 10px',
+                    fontSize: '0.68rem',
+                    fontWeight: 700,
+                    color: '#334155',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {sug}
+                </button>
+              ))}
+            </div>
+
+            <form onSubmit={handleSaveCustomEvent} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, marginBottom: '4px', color: '#334155' }}>Título de la actividad *:</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ej. Gran Vigilia, Evangelización en el parque..."
+                  value={newActTitle}
+                  onChange={e => setNewActTitle(e.target.value)}
+                  style={{ width: '100%', padding: '9px', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, marginBottom: '4px', color: '#334155' }}>Fecha *:</label>
+                  <input
+                    type="date"
+                    required
+                    value={newActDate}
+                    onChange={e => setNewActDate(e.target.value)}
+                    style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, marginBottom: '4px', color: '#334155' }}>Hora *:</label>
+                  <input
+                    type="time"
+                    required
+                    value={newActTime}
+                    onChange={e => setNewActTime(e.target.value)}
+                    style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, marginBottom: '4px', color: '#334155' }}>Lugar o punto de encuentro:</label>
+                <input
+                  type="text"
+                  value={newActLocation}
+                  onChange={e => setNewActLocation(e.target.value)}
+                  style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, marginBottom: '4px', color: '#334155' }}>Dirige (Opcional):</label>
+                  <select value={newActLeaderId} onChange={e => setNewActLeaderId(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
+                    <option value="">(Sin asignar)</option>
+                    {sortedMembers.map(m => (
+                      <option key={m.id} value={m.id}>{m.fullName}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, marginBottom: '4px', color: '#334155' }}>Predica / Expositor:</label>
+                  <select value={newActPreacherId} onChange={e => setNewActPreacherId(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
+                    <option value="">(Sin asignar)</option>
+                    {sortedMembers.map(m => (
+                      <option key={m.id} value={m.id}>{m.fullName}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, marginBottom: '4px', color: '#334155' }}>Detalle o Nota adicional:</label>
+                <input
+                  type="text"
+                  placeholder="Ej. Llevar Biblia, refrigerio..."
+                  value={newActNotes}
+                  onChange={e => setNewActNotes(e.target.value)}
+                  style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowNewEventModal(false)}
+                  style={{ flex: 1, padding: '11px', background: '#e2e8f0', border: 'none', borderRadius: '10px', fontWeight: 700, cursor: 'pointer', fontSize: '0.8rem' }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  style={{ flex: 1, padding: '11px', background: '#0f172a', color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 800, cursor: 'pointer', fontSize: '0.8rem' }}
+                >
+                  Guardar Actividad
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* MODAL REGISTRAR MOVIMIENTO FINANCIERO */}
       {showFinanceModal && (
@@ -1731,18 +1962,29 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL DE EDICIÓN DE CULTO */}
+      {/* MODAL DE EDICIÓN DE CULTO O ACTIVIDAD EXISTENTE */}
       {selectedEvent && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 100 }}>
           <div style={{ background: '#fff', width: '100%', maxWidth: '420px', maxHeight: '90vh', overflowY: 'auto', borderRadius: '20px', padding: '20px', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2)' }}>
-            <h3 style={{ margin: '0 0 4px', fontSize: '1.05rem', fontWeight: 800 }}>Asignar Responsables</h3>
-            <p style={{ margin: '0 0 14px', fontSize: '0.74rem', color: '#64748b' }}>📅 {formatFriendlyDate(selectedEvent.date)} — <strong>{selectedEvent.title}</strong></p>
+            <h3 style={{ margin: '0 0 4px', fontSize: '1.05rem', fontWeight: 800 }}>Asignar / Editar Evento</h3>
+            <p style={{ margin: '0 0 14px', fontSize: '0.74rem', color: '#64748b' }}>📅 {formatFriendlyDate(selectedEvent.date)}</p>
 
             <form onSubmit={handleSaveEvent} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               <div>
+                <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, marginBottom: '4px' }}>Título del evento / actividad:</label>
+                <input
+                  type="text"
+                  required
+                  value={modalTitle}
+                  onChange={e => setModalTitle(e.target.value)}
+                  style={{ width: '100%', padding: '9px', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontWeight: 700 }}
+                />
+              </div>
+
+              <div>
                 <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, marginBottom: '4px' }}>👤 Quién Dirige:</label>
                 <select value={modalLeaderId} onChange={e => setModalLeaderId(e.target.value)} style={{ width: '100%', padding: '9px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
-                  <option value="">(Pendiente)</option>
+                  <option value="">(Sin asignar)</option>
                   {sortedMembers.map(m => (
                     <option key={m.id} value={m.id}>{m.fullName} {memberCanLead(m) ? '✓' : ''}</option>
                   ))}
@@ -1750,9 +1992,9 @@ export default function App() {
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, marginBottom: '4px' }}>📖 Quién Predica:</label>
+                <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, marginBottom: '4px' }}>📖 Quién Predica / Expositor:</label>
                 <select value={modalPreacherId} onChange={e => setModalPreacherId(e.target.value)} style={{ width: '100%', padding: '9px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
-                  <option value="">(Pendiente)</option>
+                  <option value="">(Sin asignar)</option>
                   {sortedMembers.map(m => (
                     <option key={m.id} value={m.id}>{m.fullName} {memberCanPreach(m) ? '✓' : ''}</option>
                   ))}
@@ -1816,6 +2058,11 @@ export default function App() {
               </div>
 
               <div>
+                <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, marginBottom: '4px' }}>📝 Notas / Observaciones:</label>
+                <input type="text" value={modalNotes} onChange={e => setModalNotes(e.target.value)} placeholder="Detalle adicional..." style={{ width: '100%', padding: '9px', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
+              </div>
+
+              <div>
                 <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, marginBottom: '4px' }}>Estado:</label>
                 <select value={modalStatus} onChange={e => setModalStatus(e.target.value as any)} style={{ width: '100%', padding: '9px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
                   <option value="Programado">Programado</option>
@@ -1834,14 +2081,14 @@ export default function App() {
               </div>
 
               <button type="button" onClick={() => handleDeleteEvent(selectedEvent.id)} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '0.74rem', marginTop: '6px', cursor: 'pointer', textAlign: 'center' }}>
-                Eliminar este culto
+                Eliminar este culto/actividad
               </button>
             </form>
           </div>
         </div>
       )}
 
-      {/* 3. BARRA DE NAVEGACIÓN INFERIOR (5 PESTAÑAS) */}
+      {/* 3. BARRA DE NAVEGACIÓN INFERIOR */}
       <nav style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: '#ffffff', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-around', padding: '8px 0', maxWidth: '480px', margin: '0 auto', zIndex: 50, boxShadow: '0 -2px 10px rgba(0,0,0,0.03)' }}>
         {[
           { id: 'calendario', label: 'Calendario', icon: '📅' },
