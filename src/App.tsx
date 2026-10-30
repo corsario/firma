@@ -33,6 +33,10 @@ export default function App() {
   const [generatedBackupText, setGeneratedBackupText] = useState('');
   const [pastedRestoreText, setPastedRestoreText] = useState('');
 
+  // MODAL DE IMPORTACIÓN DESDE MYSQL / JSON
+  const [showImportMembersModal, setShowImportMembersModal] = useState(false);
+  const [importMembersText, setImportMembersText] = useState('');
+
   // Modal para agregar NUEVA ACTIVIDAD / EVENTO ESPECIAL
   const [showNewEventModal, setShowNewEventModal] = useState(false);
   const [newActTitle, setNewActTitle] = useState('');
@@ -239,7 +243,84 @@ export default function App() {
     showMsg(`¡Configuración de ${formEntityType === 'iglesia' ? 'la Iglesia' : 'la Célula'} guardada!`);
   };
 
-  // Respaldos
+  // ==================== LÓGICA DE IMPORTACIÓN DESDE MYSQL ====================
+  const processImportMembersList = async (items: any[]) => {
+    if (!Array.isArray(items) || items.length === 0) {
+      showMsg('No se encontraron registros de miembros válidos en el JSON.');
+      return;
+    }
+
+    const nowIso = new Date().toISOString();
+    const existingNames = new Set(members.map(m => m.fullName.trim().toLowerCase()));
+    const toInsert: Member[] = [];
+    let skippedCount = 0;
+
+    for (const raw of items) {
+      const name = (raw.fullName || raw.nombre || raw.nombres || raw.name || raw.nombre_completo || '').toString().trim();
+      if (!name) continue;
+
+      if (existingNames.has(name.toLowerCase())) {
+        skippedCount++;
+        continue;
+      }
+
+      const phone = (raw.phone || raw.telefono || raw.celular || raw.tel || '').toString().trim() || undefined;
+      const isTruthy = (val: any) => val === true || val === 1 || val === '1' || val === 'true' || val === 'si' || val === 's';
+
+      toInsert.push({
+        id: 'm_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+        fullName: name,
+        phone,
+        canLeadCell: isTruthy(raw.canLeadCell || raw.dirige_celula || raw.dirige),
+        canPreachCell: isTruthy(raw.canPreachCell || raw.predica_celula || raw.predica),
+        canLeadChurch: isTruthy(raw.canLeadChurch || raw.dirige_iglesia || raw.dirige),
+        canPreachChurch: isTruthy(raw.canPreachChurch || raw.predica_iglesia || raw.predica),
+        isActive: true,
+        createdAt: nowIso,
+        updatedAt: nowIso
+      });
+      existingNames.add(name.toLowerCase());
+    }
+
+    if (toInsert.length > 0) {
+      await db.members.bulkAdd(toInsert);
+      await loadAll();
+      showMsg(`✅ ¡${toInsert.length} hermanos importados con éxito! ${skippedCount > 0 ? `(${skippedCount} omitidos por ya existir)` : ''}`);
+      setShowImportMembersModal(false);
+      setImportMembersText('');
+    } else {
+      showMsg('Todos los hermanos de la lista ya estaban registrados.');
+    }
+  };
+
+  const handleImportMembersSubmit = () => {
+    try {
+      const parsed = JSON.parse(importMembersText.trim());
+      const list = Array.isArray(parsed) ? parsed : (parsed.members || parsed.data || []);
+      processImportMembersList(list);
+    } catch {
+      showMsg('El texto ingresado no es un JSON válido. Revisa las comillas y corchetes.');
+    }
+  };
+
+  const handleImportMembersFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const parsed = JSON.parse(reader.result as string);
+        const list = Array.isArray(parsed) ? parsed : (parsed.members || parsed.data || []);
+        await processImportMembersList(list);
+      } catch {
+        showMsg('Error al leer el archivo JSON.');
+      }
+    };
+    reader.readAsText(file);
+  };
+  // ===========================================================================
+
+  // Respaldos directos
   const handleGenerateBackupDirect = async () => {
     try {
       const data = {
@@ -313,7 +394,7 @@ export default function App() {
         return;
       }
 
-      if (window.confirm('¿Deseas restaurar esta copia? Reemplazará todos los datos actuales.')) {
+      if (window.confirm('¿Deseas restaurar esta copia? Reemplazará todos los datos actuales de la aplicación.')) {
         await db.transaction('rw', [db.settings, db.members, db.events, db.finances], async () => {
           if (parsed.settings) {
             await db.settings.clear();
@@ -640,7 +721,7 @@ export default function App() {
     showMsg(`⚡ ¡Mes generado y hermanos asignados para ${isChurch ? 'la Iglesia' : 'la Célula'}!`);
   };
 
-  // 4. NUEVA ACTIVIDAD / EVENTO ESPECIAL (Vigilias, Evangelización, etc.)
+  // NUEVA ACTIVIDAD / EVENTO ESPECIAL
   const openNewCustomEventModal = () => {
     const ym = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
     const defaultDay = today.getFullYear() === currentYear && today.getMonth() === currentMonth
@@ -737,7 +818,7 @@ export default function App() {
     }
   };
 
-  // Compartir programación por WhatsApp
+  // Compartir por WhatsApp
   const handleShareWhatsApp = () => {
     const ym = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
     const targetEvents = events
@@ -773,7 +854,6 @@ export default function App() {
 
       b += `📍 Lugar: ${ev.location || (isChurch ? settings.churchLocation : settings.cellLocation)}\n`;
 
-      // Mostrar responsables si corresponden
       if (ev.leaderId || ev.preacherId || ev.type === 'Servicio de célula' || isSunday || ev.type === 'Ayuno') {
         b += `👤 Dirige: ${lName}\n`;
         b += `📖 Predica: ${pName}`;
@@ -935,7 +1015,6 @@ export default function App() {
         {/* 1. CALENDARIO */}
         {tab === 'calendario' && (
           <div>
-            {/* Navegación del mes */}
             <div style={{ background: '#ffffff', padding: '12px 16px', borderRadius: '16px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
               <button onClick={() => { if (currentMonth === 0) { setCurrentMonth(11); setCurrentYear(y => y - 1); } else { setCurrentMonth(m => m - 1); } }} style={{ background: '#f1f5f9', border: 'none', width: '36px', height: '36px', borderRadius: '10px', cursor: 'pointer', fontWeight: 800 }}>◀</button>
               <div style={{ textAlign: 'center' }}>
@@ -947,7 +1026,6 @@ export default function App() {
               <button onClick={() => { if (currentMonth === 11) { setCurrentMonth(0); setCurrentYear(y => y + 1); } else { setCurrentMonth(m => m + 1); } }} style={{ background: '#f1f5f9', border: 'none', width: '36px', height: '36px', borderRadius: '10px', cursor: 'pointer', fontWeight: 800 }}>▶</button>
             </div>
 
-            {/* BOTONES PRINCIPALES: GENERAR Y NUEVA ACTIVIDAD */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '10px' }}>
               <button
                 onClick={handleGenerateAndAssign}
@@ -994,7 +1072,6 @@ export default function App() {
               </button>
             </div>
 
-            {/* Botón WhatsApp */}
             <button
               onClick={handleShareWhatsApp}
               style={{
@@ -1019,7 +1096,6 @@ export default function App() {
               <span>Compartir Programación por WhatsApp</span>
             </button>
 
-            {/* Lista de cultos y actividades */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               {visibleEvents.length === 0 ? (
                 <div style={{ background: '#fff', padding: '32px 20px', borderRadius: '18px', textAlign: 'center', color: '#64748b', fontSize: '0.85rem', border: '1px dashed #cbd5e1' }}>
@@ -1276,7 +1352,7 @@ export default function App() {
         {/* 3. INICIO */}
         {tab === 'inicio' && (
           <div>
-            <div style={{ background: 'linear-gradient(135deg, #0f172a, #1e3a8a)', color: '#fff', padding: '22px 18px', borderRadius: '20px', marginBottom: '16px', border: '1px solid #b45309' }}>
+            <div style={{ background: 'linear-gradient(135deg, #0f172a, #1e3a8a)', color: '#fff', padding: '22px 18px', borderRadius: '20px', marginBottom: '16px', border: '1px solid #b45309', boxShadow: '0 8px 16px rgba(15, 23, 42, 0.15)' }}>
               <span style={{ fontSize: '0.7rem', color: '#f59e0b', textTransform: 'uppercase', fontWeight: 800 }}>
                 {isChurch ? '🏛️ Iglesia Activa' : '🏠 Célula Activa'}
               </span>
@@ -1309,7 +1385,7 @@ export default function App() {
           </div>
         )}
 
-        {/* 4. MIEMBROS */}
+        {/* 4. MIEMBROS (CON BOTÓN DE IMPORTAR DESDE MYSQL) */}
         {tab === 'miembros' && (
           <div>
             <div style={{ position: 'relative', marginBottom: '12px' }}>
@@ -1321,6 +1397,31 @@ export default function App() {
                 style={{ width: '100%', padding: '11px 14px', borderRadius: '12px', border: '1px solid #cbd5e1', background: '#ffffff', fontSize: '0.82rem', boxSizing: 'border-box' }}
               />
             </div>
+
+            {/* BOTÓN RESTAURADO Y DESTACADO: IMPORTAR DESDE MYSQL / JSON */}
+            <button
+              onClick={() => setShowImportMembersModal(true)}
+              style={{
+                width: '100%',
+                background: 'linear-gradient(135deg, #1e3a8a, #0f172a)',
+                color: '#fff',
+                border: 'none',
+                padding: '12px',
+                borderRadius: '12px',
+                fontWeight: 800,
+                fontSize: '0.82rem',
+                cursor: 'pointer',
+                marginBottom: '14px',
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                gap: '8px',
+                boxShadow: '0 2px 6px rgba(30, 58, 138, 0.25)'
+              }}
+            >
+              <span>👥</span>
+              <span>Importar Hermanos desde MySQL / JSON</span>
+            </button>
 
             <form onSubmit={handleAddMember} style={{ background: '#fff', padding: '16px', borderRadius: '16px', border: '1px solid #e2e8f0', marginBottom: '16px' }}>
               <h3 style={{ margin: '0 0 10px', fontSize: '0.92rem', fontWeight: 800, color: '#0f172a' }}>
@@ -1529,11 +1630,21 @@ export default function App() {
             </form>
 
             {/* SECCIÓN RESPALDOS DIRECTOS Y VISIBLES */}
-            <div style={{ background: '#fff', padding: '18px', borderRadius: '18px', border: '1px solid #e2e8f0' }}>
-              <h3 style={{ margin: '0 0 6px', fontSize: '0.94rem', fontWeight: 800, color: '#0f172a' }}>📦 Copias de Seguridad (Exportar y Restaurar)</h3>
+            <div style={{ background: '#fff', padding: '18px', borderRadius: '18px', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+              <h3 style={{ margin: '0 0 6px', fontSize: '0.94rem', fontWeight: 800, color: '#0f172a' }}>📦 Copias de Seguridad y Migración</h3>
               <p style={{ fontSize: '0.74rem', color: '#64748b', margin: '0 0 14px' }}>
-                Guarda una copia de tus hermanos, cultos y finanzas para no perder nada si cambias de teléfono.
+                Guarda tus datos o importa miembros masivamente desde MySQL.
               </p>
+
+              {/* Botón directo de Importación en Ajustes también */}
+              <button
+                type="button"
+                onClick={() => setShowImportMembersModal(true)}
+                style={{ width: '100%', background: '#1e3a8a', color: '#fff', border: 'none', padding: '12px', borderRadius: '10px', fontWeight: 800, fontSize: '0.82rem', cursor: 'pointer', marginBottom: '14px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px' }}
+              >
+                <span>👥</span>
+                <span>Importar Miembros desde MySQL (JSON)</span>
+              </button>
 
               <div style={{ background: '#f8fafc', padding: '14px', borderRadius: '14px', border: '1px solid #e2e8f0', marginBottom: '16px' }}>
                 <span style={{ display: 'block', fontSize: '0.78rem', fontWeight: 800, color: '#0f172a', marginBottom: '8px' }}>
@@ -1616,7 +1727,52 @@ export default function App() {
         )}
       </main>
 
-      {/* MODAL PARA AGREGAR NUEVA ACTIVIDAD / EVENTO ESPECIAL */}
+      {/* ==================== MODAL RESTAURADO PARA IMPORTAR MIEMBROS DESDE MYSQL ==================== */}
+      {showImportMembersModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 170 }}>
+          <div style={{ background: '#fff', width: '100%', maxWidth: '420px', borderRadius: '20px', padding: '20px', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2)' }}>
+            <h3 style={{ margin: '0 0 6px', fontSize: '1.05rem', fontWeight: 800, color: '#0f172a' }}>
+              👥 Importar Miembros desde MySQL
+            </h3>
+            <p style={{ margin: '0 0 10px', fontSize: '0.74rem', color: '#64748b', lineHeight: 1.4 }}>
+              Pega el resultado JSON de tu consulta MySQL o sube el archivo exportado:
+            </p>
+
+            <textarea
+              rows={7}
+              value={importMembersText}
+              onChange={e => setImportMembersText(e.target.value)}
+              placeholder='[{"fullName": "Juan Pérez", "phone": "3001234567", "canLead": 1, "canPreach": 1}, ...]'
+              style={{ width: '100%', padding: '10px', fontSize: '0.7rem', fontFamily: 'monospace', borderRadius: '10px', border: '1px solid #cbd5e1', boxSizing: 'border-box', marginBottom: '10px' }}
+            />
+
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+              <label style={{ flex: 1, background: '#f1f5f9', color: '#0f172a', border: '1px solid #cbd5e1', padding: '10px', borderRadius: '10px', fontWeight: 700, fontSize: '0.74rem', cursor: 'pointer', textAlign: 'center' }}>
+                📁 Subir archivo .json
+                <input type="file" accept=".json" onChange={handleImportMembersFile} style={{ display: 'none' }} />
+              </label>
+
+              <button
+                onClick={handleImportMembersSubmit}
+                disabled={!importMembersText.trim()}
+                style={{ flex: 1, background: '#047857', color: '#fff', border: 'none', padding: '10px', borderRadius: '10px', fontWeight: 800, fontSize: '0.74rem', cursor: 'pointer', opacity: importMembersText.trim() ? 1 : 0.6 }}
+              >
+                Cargar Texto Pegado
+              </button>
+            </div>
+
+            <button
+              onClick={() => setShowImportMembersModal(false)}
+              style={{ width: '100%', padding: '10px', background: '#e2e8f0', border: 'none', borderRadius: '10px', fontWeight: 700, cursor: 'pointer', fontSize: '0.78rem' }}
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+      {/* ============================================================================================== */}
+
+      {/* MODAL PARA AGREGAR NUEVA ACTIVIDAD */}
       {showNewEventModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 160 }}>
           <div style={{ background: '#fff', width: '100%', maxWidth: '420px', maxHeight: '90vh', overflowY: 'auto', borderRadius: '20px', padding: '20px', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2)' }}>
@@ -1627,7 +1783,6 @@ export default function App() {
               Agrega una vigilia, evangelización o evento especial para {isChurch ? 'la Iglesia' : 'la Célula'}:
             </p>
 
-            {/* Sugerencias Rápidas */}
             <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '12px' }}>
               {['Vigilia', 'Evangelización', 'Reunión de Jóvenes', 'Ayuno Especial', 'Tarde de Alabanza'].map(sug => (
                 <button
@@ -1639,16 +1794,7 @@ export default function App() {
                     else if (sug === 'Evangelización') setNewActType('Evangelización');
                     else setNewActType('Actividad especial');
                   }}
-                  style={{
-                    background: '#f1f5f9',
-                    border: '1px solid #cbd5e1',
-                    borderRadius: '14px',
-                    padding: '4px 10px',
-                    fontSize: '0.68rem',
-                    fontWeight: 700,
-                    color: '#334155',
-                    cursor: 'pointer'
-                  }}
+                  style={{ background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '14px', padding: '4px 10px', fontSize: '0.68rem', fontWeight: 700, color: '#334155', cursor: 'pointer' }}
                 >
                   {sug}
                 </button>
@@ -2088,7 +2234,7 @@ export default function App() {
         </div>
       )}
 
-      {/* 3. BARRA DE NAVEGACIÓN INFERIOR */}
+      {/* 3. BARRA DE NAVEGACIÓN INFERIOR (5 PESTAÑAS) */}
       <nav style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: '#ffffff', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-around', padding: '8px 0', maxWidth: '480px', margin: '0 auto', zIndex: 50, boxShadow: '0 -2px 10px rgba(0,0,0,0.03)' }}>
         {[
           { id: 'calendario', label: 'Calendario', icon: '📅' },
