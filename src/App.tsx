@@ -174,7 +174,6 @@ export default function App() {
     ? (finType === 'ingreso' ? churchIncomeCategories : churchExpenseCategories)
     : (finType === 'ingreso' ? cellIncomeCategories : cellExpenseCategories);
 
-  // Orden alfabético A - Z
   const sortedMembers = [...members].sort((a, b) =>
     a.fullName.localeCompare(b.fullName, 'es', { sensitivity: 'base' })
   );
@@ -243,7 +242,7 @@ export default function App() {
     showMsg(`¡Configuración de ${formEntityType === 'iglesia' ? 'la Iglesia' : 'la Célula'} guardada!`);
   };
 
-  // ==================== LÓGICA DE IMPORTACIÓN DESDE MYSQL ====================
+  // Importar desde MySQL
   const processImportMembersList = async (items: any[]) => {
     if (!Array.isArray(items) || items.length === 0) {
       showMsg('No se encontraron registros de miembros válidos en el JSON.');
@@ -285,7 +284,7 @@ export default function App() {
     if (toInsert.length > 0) {
       await db.members.bulkAdd(toInsert);
       await loadAll();
-      showMsg(`✅ ¡${toInsert.length} hermanos importados con éxito! ${skippedCount > 0 ? `(${skippedCount} omitidos por ya existir)` : ''}`);
+      showMsg(`✅ ¡${toInsert.length} hermanos importados con éxito! ${skippedCount > 0 ? `(${skippedCount} ya existían)` : ''}`);
       setShowImportMembersModal(false);
       setImportMembersText('');
     } else {
@@ -299,7 +298,7 @@ export default function App() {
       const list = Array.isArray(parsed) ? parsed : (parsed.members || parsed.data || []);
       processImportMembersList(list);
     } catch {
-      showMsg('El texto ingresado no es un JSON válido. Revisa las comillas y corchetes.');
+      showMsg('El texto ingresado no es un JSON válido. Revisa el formato.');
     }
   };
 
@@ -318,7 +317,6 @@ export default function App() {
     };
     reader.readAsText(file);
   };
-  // ===========================================================================
 
   // Respaldos directos
   const handleGenerateBackupDirect = async () => {
@@ -394,7 +392,7 @@ export default function App() {
         return;
       }
 
-      if (window.confirm('¿Deseas restaurar esta copia? Reemplazará todos los datos actuales de la aplicación.')) {
+      if (window.confirm('¿Deseas restaurar esta copia? Reemplazará todos los datos actuales.')) {
         await db.transaction('rw', [db.settings, db.members, db.events, db.finances], async () => {
           if (parsed.settings) {
             await db.settings.clear();
@@ -517,7 +515,7 @@ export default function App() {
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
   };
 
-  // GENERAR Y ASIGNAR CULTOS HABITUALES
+  // UN SOLO BOTÓN: Generar y Asignar Cultos
   const handleGenerateAndAssign = async () => {
     const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
     const nowIso = new Date().toISOString();
@@ -1636,7 +1634,7 @@ export default function App() {
                 Guarda tus datos o importa miembros masivamente desde MySQL.
               </p>
 
-              {/* Botón directo de Importación en Ajustes también */}
+              {/* Botón directo de Importación en Ajustes */}
               <button
                 type="button"
                 onClick={() => setShowImportMembersModal(true)}
@@ -1727,7 +1725,7 @@ export default function App() {
         )}
       </main>
 
-      {/* ==================== MODAL RESTAURADO PARA IMPORTAR MIEMBROS DESDE MYSQL ==================== */}
+      {/* ==================== MODAL PARA IMPORTAR MIEMBROS DESDE MYSQL ==================== */}
       {showImportMembersModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 170 }}>
           <div style={{ background: '#fff', width: '100%', maxWidth: '420px', borderRadius: '20px', padding: '20px', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2)' }}>
@@ -1770,7 +1768,6 @@ export default function App() {
           </div>
         </div>
       )}
-      {/* ============================================================================================== */}
 
       {/* MODAL PARA AGREGAR NUEVA ACTIVIDAD */}
       {showNewEventModal && (
@@ -2234,7 +2231,7 @@ export default function App() {
         </div>
       )}
 
-      {/* 3. BARRA DE NAVEGACIÓN INFERIOR (5 PESTAÑAS) */}
+      {/* 3. BARRA DE NAVEGACIÓN INFERIOR */}
       <nav style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: '#ffffff', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-around', padding: '8px 0', maxWidth: '480px', margin: '0 auto', zIndex: 50, boxShadow: '0 -2px 10px rgba(0,0,0,0.03)' }}>
         {[
           { id: 'calendario', label: 'Calendario', icon: '📅' },
