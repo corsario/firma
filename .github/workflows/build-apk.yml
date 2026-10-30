@@ -1,4 +1,4 @@
-name: Compilar APK La verdad de Cristo
+﻿name: Compilar APK LEHV La catedral del Avivamiento
 
 on:
   push:
@@ -32,10 +32,14 @@ jobs:
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
       - name: Instalar dependencias
-        run: npm install
+        run: |
+          npm install
+          chmod -R +x node_modules/.bin || true
 
       - name: Compilar aplicacion web
-        run: npm run build
+        run: |
+          chmod -R +x node_modules/.bin || true
+          npx vite build
 
       - name: Configurar Capacitor Android
         run: |
@@ -53,5 +57,5 @@ jobs:
       - name: Subir APK generado
         uses: actions/upload-artifact@v4
         with:
-          name: LaVerdadDeCristo-Territorio9-Debug
+          name: LEHV-LaCatedralDelAvivamiento-Debug
           path: android/app/build/outputs/apk/debug/*.apk
